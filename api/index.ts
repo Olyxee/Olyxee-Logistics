@@ -1,11 +1,8 @@
-import type { IncomingMessage, ServerResponse } from "node:http";
-import { resolve } from "node:path";
-import { pathToFileURL } from "node:url";
+// Vercel type-checks this function separately from the API workspace, without
+// its Node type declarations. Its generated handler runs as CommonJS.
+declare const __dirname: string;
 
-type ExpressApp = (
-  req: IncomingMessage,
-  res: ServerResponse,
-) => unknown;
+type ExpressApp = (req: unknown, res: unknown) => unknown;
 type AppModule = { default: ExpressApp };
 
 // Vercel compiles api/index.ts as CommonJS. Keep this import native at runtime:
@@ -17,12 +14,9 @@ const importEsm = new Function(
 
 let appPromise: Promise<AppModule> | undefined;
 
-export default async function handler(
-  req: IncomingMessage,
-  res: ServerResponse,
-) {
+export default async function handler(req: unknown, res: unknown) {
   appPromise ??= importEsm(
-    pathToFileURL(resolve(__dirname, "_bundle/app.mjs")).href,
+    `file://${__dirname}/_bundle/app.mjs`,
   );
   const { default: app } = await appPromise;
   return app(req, res);
