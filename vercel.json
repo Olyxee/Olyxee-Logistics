@@ -5,7 +5,7 @@
   "outputDirectory": "artifacts/olyxee-admin/dist/public",
   "framework": "vite",
   "functions": {
-    "api/index.mjs": {
+    "api/index.ts": {
       "includeFiles": "api/_bundle/**"
     }
   },
