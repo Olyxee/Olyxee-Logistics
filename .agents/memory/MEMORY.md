@@ -12,3 +12,4 @@
 - [Artifact router ports](artifact-router-ports.md) — preview routes / → port 23915 (artifact.toml), /api → 8080; running Vite on 5000 502s the external preview.
 - [Plan catalog](plan-catalog.md) — IDs frozen (DB enum + codegen); catalog is Free + Scale (R1,499, billing starts 30 Sep 2026), pro/Growth retired, SMS removed; edit @workspace/plans, never hardcode names in JSX.
 - [GitHub writes from Replit](github-writes.md) — CLI pushes may lack credentials; use the connected GitHub SDK for atomic, fast-forward-only commits.
+- [API codegen compatibility](api-codegen-compatibility.md) — older Orval releases are blocked here; newer generation needs Zod 4 for generated schemas and DOM.Iterable for generated fetch clients.

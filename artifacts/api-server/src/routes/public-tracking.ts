@@ -18,7 +18,7 @@ const router = Router();
 // Public tracking may be the first route hit after a deployment, so it cannot
 // rely on an authenticated order request having applied the additive migration.
 let trackingExceptionSchemaReady: Promise<void> | null = null;
-router.use((req, res, next) => {
+router.use("/public/track", (req, res, next) => {
   trackingExceptionSchemaReady ??= db.execute(sql`ALTER TABLE "tracking_events" ADD COLUMN IF NOT EXISTS "exception_type" text`).then(() => undefined).catch((error) => {
     trackingExceptionSchemaReady = null;
     throw error;
