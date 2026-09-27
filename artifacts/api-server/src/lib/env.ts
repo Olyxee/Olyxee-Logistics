@@ -42,6 +42,17 @@ const RECOMMENDED: EnvCheck[] = [
     description:
       "Plain sender address on a Resend-verified platform domain (e.g. notifications@olyxee.com). Required for outbound email; each business supplies the display name and Reply-To.",
   },
+  {
+    name: "SMSPORTAL_CLIENT_ID",
+    required: false,
+    description:
+      "SMSPortal REST API Client ID (https://smsportal.com). SMS is also gated behind featureFlags.smsNotifications - credentials alone never enable sending.",
+  },
+  {
+    name: "SMSPORTAL_API_SECRET",
+    required: false,
+    description: "SMSPortal REST API Secret, paired with SMSPORTAL_CLIENT_ID.",
+  },
 ];
 
 export function validateEnv(): void {

@@ -1,6 +1,6 @@
 {
   "$schema": "https://openapi.vercel.sh/vercel.json",
-  "buildCommand": "pnpm -w exec sh -c 'pnpm --filter @workspace/api-server run build && mkdir -p api/_bundle && cp artifacts/api-server/dist/*.mjs api/_bundle/ && pnpm --filter @workspace/olyxee-admin run build'",
+  "buildCommand": "cd \"$(git rev-parse --show-toplevel)\" && pnpm --filter @workspace/api-server run build && mkdir -p api/_bundle && cp artifacts/api-server/dist/*.mjs api/_bundle/ && pnpm --filter @workspace/olyxee-admin run build",
   "installCommand": "pnpm install",
   "outputDirectory": "artifacts/olyxee-admin/dist/public",
   "framework": "vite",

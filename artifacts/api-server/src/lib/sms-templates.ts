@@ -49,3 +49,28 @@ export function buildSmsBody(params: SendStatusSmsParams): string {
 
   return body;
 }
+
+export interface SendInvoiceSmsParams {
+  businessName: string;
+  invoiceNumber: string;
+  total: number;
+  currency: string;
+  trackingId?: string | null;
+}
+
+// Build a concise "invoice sent" SMS. Confirms an invoice went out and gives
+// the amount due - full line-item detail stays in the emailed PDF, not SMS.
+export function buildInvoiceSmsBody(params: SendInvoiceSmsParams): string {
+  const amount = `${params.currency} ${params.total.toFixed(2)}`;
+  const parts = [
+    `${params.businessName}: Invoice ${params.invoiceNumber}`,
+    `Amount due: ${amount}`,
+  ];
+  if (params.trackingId) {
+    parts.push(`Ref: ${params.trackingId}`);
+  }
+  parts.push("Check your email for the full invoice.");
+
+  const body = parts.join(" | ");
+  return body.length > 160 ? `${body.slice(0, 157)}...` : body;
+}

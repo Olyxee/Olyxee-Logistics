@@ -900,22 +900,35 @@ router.post("/orders/:orderId/status", requireAuth, async (req, res) => {
     }
 
     // 5b. Send SMS if the customer has a phone number and SMS is configured.
-    const sms = notifyCustomer && business ? await sendOrderSms({
-      orderId,
-      customerPhone: customer?.phone ?? undefined,
-      businessName: business.name,
-      trackingId: order.trackingId,
-      // SMS is customer-facing too: send the friendly label, not the code.
-      status: order.transportMode ? logisticsStatusLabel(status) : status,
-      statusMessage: message ?? null,
-      trackingLink,
-      businessPlan: business.plan,
-      businessId,
-    }) : { smsStatus: "skipped" as const, smsNotificationId: undefined, smsUsage: undefined, smsLimit: undefined };
-    const smsStatus = sms.smsStatus;
-    const smsNotificationId = sms.smsNotificationId;
-    const smsUsage = sms.smsUsage;
-    const smsLimit = sms.smsLimit;
+    // Best-effort and secondary to the order-status update above, which has
+    // already committed by this point - a provider/DB hiccup here must never
+    // turn an already-successful status update into a failed request.
+    let smsStatus: "sent" | "failed" | "skipped" | "limit_reached" = "skipped";
+    let smsNotificationId: string | undefined;
+    let smsUsage: number | undefined;
+    let smsLimit: number | null | undefined;
+    if (notifyCustomer && business) {
+      try {
+        const sms = await sendOrderSms({
+          orderId,
+          customerPhone: customer?.phone ?? undefined,
+          businessName: business.name,
+          trackingId: order.trackingId,
+          // SMS is customer-facing too: send the friendly label, not the code.
+          status: order.transportMode ? logisticsStatusLabel(status) : status,
+          statusMessage: message ?? null,
+          trackingLink,
+          businessPlan: business.plan,
+          businessId,
+        });
+        smsStatus = sms.smsStatus;
+        smsNotificationId = sms.smsNotificationId;
+        smsUsage = sms.smsUsage;
+        smsLimit = sms.smsLimit;
+      } catch (err) {
+        req.log.error({ err, orderId }, "Order status SMS send failed (non-fatal)");
+      }
+    }
 
     // 6. Audit log
     await db.insert(auditLogsTable).values({
@@ -1211,6 +1224,10 @@ router.post("/orders/:orderId/resend-email", requireAuth, async (req, res) => {
       trackingLink,
       businessPlan: business.plan,
       businessId,
+      // This is an explicit user-triggered resend - always send again, even
+      // if the same message already went out (the dedupe guard is only for
+      // protecting the automatic status-change path against retries).
+      skipDuplicateCheck: true,
     });
     const smsStatus = sms.smsStatus;
     const smsNotificationId = sms.smsNotificationId;

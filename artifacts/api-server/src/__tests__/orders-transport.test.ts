@@ -55,8 +55,9 @@ vi.mock("../lib/email", () => ({
 vi.mock("../lib/email-usage", () => ({
   getMonthlyEmailUsage: vi.fn(async () => 0),
 }));
+const mockSendOrderSms = vi.fn(async (..._args: unknown[]) => ({ status: "skipped" }));
 vi.mock("../lib/order-notifications", () => ({
-  sendOrderSms: vi.fn(async () => ({ status: "skipped" })),
+  sendOrderSms: (...args: unknown[]) => mockSendOrderSms(...args),
 }));
 vi.mock("../lib/notifications", () => ({
   recordNotification: vi.fn(async () => undefined),
@@ -71,6 +72,13 @@ vi.mock("../lib/order-fsm", () => ({
 async function buildApp() {
   const app = express();
   app.use(express.json());
+  // Production wires req.log via pino-http; stub it here so routes that call
+  // req.log.error(...) directly (matching this file's real logging
+  // convention) don't crash the bare test harness when a catch block runs.
+  app.use((req, _res, next) => {
+    (req as any).log = console;
+    next();
+  });
   const { default: router } = await import("../routes/orders");
   app.use(router);
   return app;
@@ -373,6 +381,44 @@ describe("POST /orders/:orderId/status — transport-aware validation", () => {
       .post("/orders/ord_1/status")
       .send({ status: "PREPARING_FOR_SHIPMENT" });
     expect(res.status).toBe(200);
+    expect(mockDb.transaction).toHaveBeenCalled();
+  });
+
+  it("still returns 200 with the already-committed status update when the SMS layer throws", async () => {
+    mockDb.query.ordersTable.findFirst.mockResolvedValue({ ...SEA_ORDER, currentStatus: "RECEIVED_AT_WAREHOUSE" });
+    // No customer looked up (matches the other passing transition tests
+    // above) - this test only needs the SMS-send call site to be reached and
+    // to throw, which happens regardless of customer/email details.
+    mockDb.query.customersTable.findFirst.mockResolvedValue(null);
+    mockDb.query.businessesTable.findFirst.mockResolvedValue({
+      ...LOGISTICS_BIZ,
+      plan: "beta",
+      monthlyEmailLimit: 500,
+    });
+    mockDb.insert.mockReturnValue(insertChainPlain() as any);
+    const updated = { ...SEA_ORDER, currentStatus: "PREPARING_FOR_SHIPMENT" };
+    const txInsert = vi.fn(() => ({
+      values: vi.fn(() => ({ returning: vi.fn(async () => [{ id: "tev_2", status: "PREPARING_FOR_SHIPMENT", createdAt: new Date() }]) })),
+    }));
+    const txUpdate = vi.fn(() => ({
+      set: vi.fn(() => ({ where: vi.fn(() => ({ returning: vi.fn(async () => [updated]) })) })),
+    }));
+    mockDb.transaction.mockImplementation(async (fn: any) =>
+      fn({ insert: txInsert, update: txUpdate }),
+    );
+    // Simulate an unexpected failure inside the SMS layer (e.g. a DB error
+    // from the dedup check) - the order status update has already committed
+    // above by this point and must not be reported as a failed request.
+    mockSendOrderSms.mockRejectedValueOnce(new Error("boom - simulated SMS layer crash"));
+
+    const app = await buildApp();
+    const res = await request(app)
+      .post("/orders/ord_1/status")
+      .send({ status: "PREPARING_FOR_SHIPMENT" });
+
+    expect(res.status).toBe(200);
+    expect(res.body.order.currentStatus).toBe("PREPARING_FOR_SHIPMENT");
+    expect(res.body.smsStatus).toBe("skipped");
     expect(mockDb.transaction).toHaveBeenCalled();
   });
 });

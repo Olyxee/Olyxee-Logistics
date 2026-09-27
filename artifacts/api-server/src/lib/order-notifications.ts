@@ -3,7 +3,9 @@ import { generateId } from "./id";
 import { sendSms, isSmsConfigured } from "./sms";
 import { buildSmsBody } from "./sms-templates";
 import { getMonthlySmsUsage } from "./sms-usage";
+import { findRecentDuplicateSms } from "./sms-dedup";
 import { getPlan, type PlanId } from "@workspace/plans";
+import { logger } from "./logger";
 
 export type SendOrderSmsResult = {
   smsStatus: "sent" | "failed" | "skipped" | "limit_reached";
@@ -22,6 +24,10 @@ export async function sendOrderSms(params: {
   trackingLink: string;
   businessPlan: PlanId;
   businessId: string;
+  // The manual "resend" action deliberately wants a fresh send even if an
+  // identical message already went out - only the automatic status-change
+  // path (which a retried request could trigger twice) dedupes by default.
+  skipDuplicateCheck?: boolean;
 }): Promise<SendOrderSmsResult> {
   const {
     orderId,
@@ -33,6 +39,7 @@ export async function sendOrderSms(params: {
     trackingLink,
     businessPlan,
     businessId,
+    skipDuplicateCheck,
   } = params;
 
   let smsStatus: SendOrderSmsResult["smsStatus"] = "skipped";
@@ -49,6 +56,22 @@ export async function sendOrderSms(params: {
       trackingLink,
       customerPhone,
     });
+
+    if (!skipDuplicateCheck) {
+      const duplicate = await findRecentDuplicateSms(orderId, smsBody);
+      if (duplicate) {
+        logger.info(
+          { orderId, smsNotificationId: duplicate.id },
+          "Skipping SMS send - identical message already sent recently for this order",
+        );
+        return {
+          smsStatus: "skipped",
+          smsNotificationId: duplicate.id,
+          smsUsage: undefined,
+          smsLimit: undefined,
+        };
+      }
+    }
 
     smsLimit = getPlan(businessPlan).smsLimit ?? null;
     smsUsage = await getMonthlySmsUsage(businessId);
