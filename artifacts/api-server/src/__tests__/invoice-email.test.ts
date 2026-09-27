@@ -33,7 +33,7 @@ describe("invoice email delivery", () => {
   beforeEach(() => {
     vi.clearAllMocks();
     process.env.RESEND_API_KEY = "re_test";
-    process.env.EMAIL_FROM_ADDRESS = "notifications@logistics.olyxee.com";
+    process.env.EMAIL_FROM_ADDRESS = "notifications@olyxee.com";
     mocks.send.mockResolvedValue({ data: { id: "email_1" }, error: null });
   });
 
@@ -43,7 +43,7 @@ describe("invoice email delivery", () => {
     expect(result).toEqual({ success: true, messageId: "email_1" });
     expect(mocks.send).toHaveBeenCalledTimes(1);
     const payload = mocks.send.mock.calls[0][0];
-    expect(payload.from).toBe("Acme Freight <notifications@logistics.olyxee.com>");
+    expect(payload.from).toBe("Acme Freight <notifications@olyxee.com>");
     expect(payload.replyTo).toBe("accounts@acmefreight.test");
     expect(payload.html).toContain("Hi Thabo Nkosi,");
     expect(payload.html).toContain("Please find your invoice attached to this email as a PDF");
@@ -68,7 +68,7 @@ describe("invoice email delivery", () => {
 
     expect(result).toEqual({ success: true, messageId: "email_1" });
     const payload = mocks.send.mock.calls[0][0];
-    expect(payload.replyTo).toBe("notifications@logistics.olyxee.com");
+    expect(payload.replyTo).toBe("notifications@olyxee.com");
     expect(payload.attachments[0].content.toString("latin1")).toContain("/Subtype /Image");
   });
 
@@ -97,7 +97,7 @@ describe("invoice email delivery", () => {
     expect(payload.html).toContain("help@acmefreight.test");
     expect(payload.html).toContain("View tracking on Acme Freight");
     expect(payload.html).toContain("https://acmefreight.test/track-shipment/?code=ACM-001-2026");
-    expect(payload.from).toBe("Acme Freight <notifications@logistics.olyxee.com>");
+    expect(payload.from).toBe("Acme Freight <notifications@olyxee.com>");
     expect(payload.replyTo).toBe("help@acmefreight.test");
   });
 
@@ -109,9 +109,9 @@ describe("invoice email delivery", () => {
       invoiceNumber: "INV-FAST-01",
     });
     const [a, b] = mocks.send.mock.calls.map(([payload]) => payload);
-    expect(a.from).toBe("Acme Freight <notifications@logistics.olyxee.com>");
+    expect(a.from).toBe("Acme Freight <notifications@olyxee.com>");
     expect(a.replyTo).toBe("accounts@acmefreight.test");
-    expect(b.from).toBe("Fast Cargo <notifications@logistics.olyxee.com>");
+    expect(b.from).toBe("Fast Cargo <notifications@olyxee.com>");
     expect(b.replyTo).toBe("team@fastcargo.test");
     expect(b.html).toContain("Fast Cargo");
     expect(b.html).not.toContain("Acme Freight");
@@ -128,7 +128,7 @@ describe("invoice email delivery", () => {
     });
     expect(result.success).toBe(true);
     const payload = mocks.send.mock.calls[0][0];
-    expect(payload.from).toBe("Fast Cargo <notifications@logistics.olyxee.com>");
+    expect(payload.from).toBe("Fast Cargo <notifications@olyxee.com>");
     expect(payload.replyTo).toBe("team@fastcargo.test");
     expect(payload.subject).toBe("Reset your Fast Cargo password");
     expect(payload.html).not.toContain("Acme Freight");
@@ -142,8 +142,8 @@ describe("invoice email delivery", () => {
       trackingLink: "https://logistics.olyxee.com/track?code=TRACK-1",
     });
     const payload = mocks.send.mock.calls[0][0];
-    expect(payload.from).toBe("Logistics <notifications@logistics.olyxee.com>");
-    expect(payload.replyTo).toBe("notifications@logistics.olyxee.com");
+    expect(payload.from).toBe("Logistics <notifications@olyxee.com>");
+    expect(payload.replyTo).toBe("notifications@olyxee.com");
   });
 
   it("keeps two businesses' tracking updates separate", async () => {
@@ -161,9 +161,9 @@ describe("invoice email delivery", () => {
       supportEmail: "team@fastcargo.test",
     });
     const [a, b] = mocks.send.mock.calls.map(([payload]) => payload);
-    expect(a.from).toBe("Acme Freight <notifications@logistics.olyxee.com>");
+    expect(a.from).toBe("Acme Freight <notifications@olyxee.com>");
     expect(a.replyTo).toBe("help@acmefreight.test");
-    expect(b.from).toBe("Fast Cargo <notifications@logistics.olyxee.com>");
+    expect(b.from).toBe("Fast Cargo <notifications@olyxee.com>");
     expect(b.replyTo).toBe("team@fastcargo.test");
     expect(b.html).not.toContain("Acme Freight");
     expect(b.text).not.toContain("Acme Freight");
@@ -173,7 +173,7 @@ describe("invoice email delivery", () => {
     delete process.env.EMAIL_FROM_ADDRESS;
     expect(await sendInvoiceEmail(invoice)).toMatchObject({ success: false, error: "Email sender not configured" });
     expect(mocks.send).not.toHaveBeenCalled();
-    process.env.EMAIL_FROM_ADDRESS = "Wrong Brand <notifications@logistics.olyxee.com>";
+    process.env.EMAIL_FROM_ADDRESS = "Wrong Brand <notifications@olyxee.com>";
     expect(await sendStatusEmail({
       businessId: "business-acme", businessName: "Acme Freight", supportEmail: "",
       customerEmail: "customer@example.test", customerName: "Client",

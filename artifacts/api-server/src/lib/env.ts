@@ -40,7 +40,7 @@ const RECOMMENDED: EnvCheck[] = [
     name: "EMAIL_FROM_ADDRESS",
     required: false,
     description:
-      "Plain sender address on a Resend-verified platform domain (e.g. notifications@logistics.olyxee.com). Required for outbound email; each business supplies the display name and Reply-To.",
+      "Plain sender address on a Resend-verified platform domain (e.g. notifications@olyxee.com). Required for outbound email; each business supplies the display name and Reply-To.",
   },
 ];
 
