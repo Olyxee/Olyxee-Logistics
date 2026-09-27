@@ -44,7 +44,7 @@ Olyxee Logistics is a cross-border order-tracking and customer-notification syst
 
 ## User preferences
 
-- This Replit workspace uses artifact path routing: `/api` goes to Express and other paths go to the Vite app. Deployment settings and secrets are managed in Replit.
+- Replit development uses artifact path routing: `/api` goes to Express and other paths go to Vite. Vercel builds the same apps as a Vite static site plus an Express serverless function; configure secrets and database URLs separately in each platform.
 - No SMSPortal sender ID: SMS goes out from a shared SMSPortal number for all tenants. When the SMS channel is enabled, each message body must lead with the business's name (multi-tenant branding lives in the message text, not the sender).
 
 ## Gotchas
