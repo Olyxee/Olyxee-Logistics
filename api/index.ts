@@ -1,10 +1,29 @@
-// Vercel serverless entrypoint. The /api/* rewrite in vercel.json routes
-// API requests to this function, which delegates them to the existing
-// Express app.
-//
-// The app bundle is copied into api/_bundle at build time so this function
-// is self-contained inside Vercel's function directory.
-// @ts-expect-error -- bundled .mjs has no type declarations
-import app from "./_bundle/app.mjs";
+import type { IncomingMessage, ServerResponse } from "node:http";
+import { resolve } from "node:path";
+import { pathToFileURL } from "node:url";
 
-export default app;
+type ExpressApp = (
+  req: IncomingMessage,
+  res: ServerResponse,
+) => unknown;
+type AppModule = { default: ExpressApp };
+
+// Vercel compiles api/index.ts as CommonJS. Keep this import native at runtime:
+// a compiled `import()` can become `require()`, which cannot load app.mjs.
+const importEsm = new Function(
+  "specifier",
+  "return import(specifier)",
+) as (specifier: string) => Promise<AppModule>;
+
+let appPromise: Promise<AppModule> | undefined;
+
+export default async function handler(
+  req: IncomingMessage,
+  res: ServerResponse,
+) {
+  appPromise ??= importEsm(
+    pathToFileURL(resolve(__dirname, "_bundle/app.mjs")).href,
+  );
+  const { default: app } = await appPromise;
+  return app(req, res);
+}
