@@ -5,7 +5,6 @@
   "scripts": {
     "preinstall": "node -e \"if (!process.env.npm_config_user_agent?.startsWith('pnpm/')) { process.stderr.write('Use pnpm instead\\n'); process.exit(1); }\"",
     "build": "pnpm run typecheck && pnpm -r --if-present run build",
-    "build:vercel": "pnpm -r --if-present run build:vercel",
     "typecheck:libs": "tsc --build",
     "typecheck": "pnpm run typecheck:libs && pnpm -r --filter \"./artifacts/**\" --filter \"./scripts\" --if-present run typecheck"
   },

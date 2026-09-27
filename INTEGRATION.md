@@ -256,10 +256,15 @@ email. Suggested messages are pre-filled per status but you can rewrite them.
 
 **Where does the customer's email get sent from?**
 Olyxee uses Resend. The sender is configured via the `RESEND_API_KEY` and
-`EMAIL_FROM` environment variables on the API server.
+`EMAIL_FROM_ADDRESS` environment variables on the API server. Use an address
+on the Resend-verified `olyxee.com` domain, such as
+`notifications@olyxee.com`. The `logistics.olyxee.com` hostname is for the app
+deployment, not email sending. Each business supplies the sender display name
+and Reply-To address; the platform sender address stays the same.
 
 **Can I have more than one business / brand in one Olyxee install?**
-Today, one Olyxee install = one business. Multi-tenant is a future addition.
+Yes. Each authenticated business has its own customers, orders and email
+branding while all businesses use the same verified platform sender domain.
 
 ---
 

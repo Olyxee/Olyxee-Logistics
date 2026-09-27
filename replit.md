@@ -1,24 +1,27 @@
-# [Project name]
+# Olyxee Logistics
 
-_Replace the heading above with the project's name, and this line with one sentence describing what this app does for users._
+Olyxee Logistics manages cross-border shipments, invoices, customer updates, and public order tracking.
 
 ## Run & Operate
 
-- `pnpm --filter @workspace/api-server run dev` — run the API server (port 5000)
+- The web artifact serves `/` on port 23915; the API artifact serves `/api` on port 8080. Start both using their Replit workflows.
+- `pnpm --filter @workspace/api-server run dev` — run the API server (port 8080; workflow supplies `PORT`)
+- `pnpm --filter @workspace/olyxee-admin run dev` — run the web app (port 23915; workflow supplies `PORT`)
+- `pnpm --filter @workspace/api-server run test` and `pnpm --filter @workspace/olyxee-admin run test` — app tests
 - `pnpm run typecheck` — full typecheck across all packages
 - `pnpm run build` — typecheck + build all packages
 - `pnpm --filter @workspace/api-spec run codegen` — regenerate API hooks and Zod schemas from the OpenAPI spec
 - `pnpm --filter @workspace/db run push` — push DB schema changes (dev only)
-- Required env: `DATABASE_URL` — Postgres connection string
+- Required env: `DATABASE_URL` — Replit development Postgres connection; `SESSION_SECRET` signs sessions. For an existing external database, `APP_DATABASE_URL` takes precedence; never silently replace its data with the development database.
 
 ## Stack
 
-- pnpm workspaces, Node.js 24, TypeScript 5.9
+- pnpm workspaces, Node.js 20+, TypeScript 5.9
 - API: Express 5
 - DB: PostgreSQL + Drizzle ORM
 - Validation: Zod (`zod/v4`), `drizzle-zod`
 - API codegen: Orval (from OpenAPI spec)
-- Build: esbuild (CJS bundle)
+- Build: esbuild (ESM API bundle) and Vite (static web app)
 
 ## Where things live
 
@@ -41,7 +44,7 @@ Olyxee Logistics is a cross-border order-tracking and customer-notification syst
 
 ## User preferences
 
-- Deploys to Vercel; user manages env vars there themselves — give them exact env var names when adding config.
+- Replit development uses artifact path routing: `/api` goes to Express and other paths go to Vite. Vercel builds the same apps as a Vite static site plus an Express serverless function; configure secrets and database URLs separately in each platform.
 - No SMSPortal sender ID: SMS goes out from a shared SMSPortal number for all tenants. When the SMS channel is enabled, each message body must lead with the business's name (multi-tenant branding lives in the message text, not the sender).
 
 ## Gotchas

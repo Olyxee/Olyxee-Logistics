@@ -12,3 +12,7 @@
 - [Artifact router ports](artifact-router-ports.md) — preview routes / → port 23915 (artifact.toml), /api → 8080; running Vite on 5000 502s the external preview.
 - [Plan catalog](plan-catalog.md) — IDs frozen (DB enum + codegen); catalog is Free + Scale (R1,499, billing starts 30 Sep 2026), pro/Growth retired, SMS removed; edit @workspace/plans, never hardcode names in JSX.
 - [GitHub writes from Replit](github-writes.md) — CLI pushes may lack credentials; use the connected GitHub SDK for atomic, fast-forward-only commits.
+- [API codegen compatibility](api-codegen-compatibility.md) — older Orval releases are blocked here; newer generation needs Zod 4 for generated schemas and DOM.Iterable for generated fetch clients.
+- [Vercel monorepo build cwd](vercel-monorepo-build-cwd.md) — Vercel can run the custom build from an artifact subdirectory; anchor root-relative commands to the workspace root.
+- [Migration backup provenance](migration-backup-provenance.md) — the recovery backup predates later root changes; do not overwrite the working workspace from it during migration.
+- [Legacy auth identity gap](legacy-auth-identity-gap.md) — old Supabase identities can lack app-user/business links; never infer tenant access from an email or claimed business name.

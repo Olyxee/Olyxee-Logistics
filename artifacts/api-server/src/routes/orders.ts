@@ -486,7 +486,7 @@ router.post("/orders", requireAuth, async (req, res) => {
       await tx.insert(auditLogsTable).values({id:generateId(),businessId,userId,action:"CREATE_ORDER_AND_INVOICE",entityType:"order",entityId:o.id,metadata:{trackingId:o.trackingId,invoiceId,invoiceNumber:invoiceNo}});
     });
 
-    const delivery = business ? await sendInvoiceEmail({customerEmail:customer.email,customerName:customer.fullName,customerAddress:customer.address,customerPhone:customer.phone,invoiceNumber:invoiceNo,createdAt:new Date(),dueDate,description:o.cargoType||o.description||"Cross-border logistics service",serviceDetails:o.serviceRequired||"",quantity:1,subtotal,additionalCharges,total,currency:"ZAR",businessName:business.invoiceLegalName||business.name,supportEmail:business.invoiceEmail||business.supportEmail,businessPhone:business.invoicePhone||business.phone,businessAddress:business.invoiceAddress||business.location,logoUrl:business.businessLogoUrl||business.invoiceLogoUrl,companyRegistration:business.invoiceRegistrationNumber||undefined,taxNumber:business.invoiceTaxNumber,paymentDetails:business.invoicePaymentDetails,paymentTerms:business.invoicePaymentTerms,footerNote:business.invoiceFooterNote,primaryColor:business.primaryBrandColour,orderReference:o.orderReference,jobNumber:o.jobNumber,trackingId:o.trackingId,externalTrackingNumber:o.supplierTrackingNumber,origin:o.origin,destination:o.destination,transportMode:o.transportMode,weight:o.weight}) : {success:false,error:"Business not found"};
+    const delivery = business ? await sendInvoiceEmail({businessId,senderBusinessName:business.name,customerEmail:customer.email,customerName:customer.fullName,customerAddress:customer.address,customerPhone:customer.phone,invoiceNumber:invoiceNo,createdAt:new Date(),dueDate,description:o.cargoType||o.description||"Cross-border logistics service",serviceDetails:o.serviceRequired||"",quantity:1,subtotal,additionalCharges,total,currency:"ZAR",businessName:business.invoiceLegalName||business.name,supportEmail:business.invoiceEmail||business.supportEmail,businessPhone:business.invoicePhone||business.phone,businessAddress:business.invoiceAddress||business.location,logoUrl:business.businessLogoUrl||business.invoiceLogoUrl,companyRegistration:business.invoiceRegistrationNumber||undefined,taxNumber:business.invoiceTaxNumber,paymentDetails:business.invoicePaymentDetails,paymentTerms:business.invoicePaymentTerms,footerNote:business.invoiceFooterNote,primaryColor:business.primaryBrandColour,orderReference:o.orderReference,jobNumber:o.jobNumber,trackingId:o.trackingId,externalTrackingNumber:o.supplierTrackingNumber,origin:o.origin,destination:o.destination,transportMode:o.transportMode,weight:o.weight}) : {success:false,error:"Business not found"};
     if(delivery.success){
       await db.update(invoicesTable).set({status:"sent",sentAt:new Date(),updatedAt:new Date()}).where(and(eq(invoicesTable.id,invoiceId),eq(invoicesTable.businessId,businessId)));
       // Invoice sent -> billing_status AWAITING_PAYMENT.
@@ -832,6 +832,7 @@ router.post("/orders/:orderId/status", requireAuth, async (req, res) => {
       }
 
       const emailParams = {
+        businessId,
         customerEmail: customer.email,
         customerName: customer.fullName,
         trackingId: order.trackingId,
@@ -1132,6 +1133,7 @@ router.post("/orders/:orderId/resend-email", requireAuth, async (req, res) => {
 
     const trackingLink = buildTrackingLink(business.websiteUrl, order.trackingId);
     const emailParams = {
+      businessId,
       customerEmail: customer.email,
       customerName: customer.fullName,
       trackingId: order.trackingId,

@@ -47,6 +47,7 @@ Thumbs.db
 # Replit
 .cache/
 .local/
+/api/_bundle/*
 
 # Environment (secrets — never commit)
 .env.local

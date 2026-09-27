@@ -352,6 +352,11 @@ router.post("/auth/forgot-password", async (req, res) => {
       where: eq(usersTable.email, email),
     });
     if (user) {
+      // The reset request is unauthenticated. Resolve branding only through
+      // this matched user's business, never from request-supplied tenant data.
+      const business = await db.query.businessesTable.findFirst({
+        where: eq(businessesTable.id, user.businessId),
+      });
       const token = crypto.randomBytes(32).toString("base64url");
       const tokenHash = hashResetToken(token);
       const expiresAt = new Date(Date.now() + RESET_TOKEN_TTL_MINUTES * 60 * 1000);
@@ -363,6 +368,9 @@ router.post("/auth/forgot-password", async (req, res) => {
       });
       const link = buildResetLink(req, token);
       const result = await sendPasswordResetEmail({
+        businessId: user.businessId,
+        businessName: business?.name,
+        supportEmail: business?.supportEmail,
         to: user.email,
         name: user.name,
         resetLink: link,

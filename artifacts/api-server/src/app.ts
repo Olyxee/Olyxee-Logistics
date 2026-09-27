@@ -22,7 +22,7 @@ warmBusinessAllowedOrigins();
 
 const app: Express = express();
 
-// Trust the platform proxy (Vercel/Replit) so req.ip reflects the real client
+// Trust the platform proxy so req.ip reflects the real client
 // IP for rate limiting and logging. Trusting "1" hop is the safe default.
 app.set("trust proxy", 1);
 
@@ -47,7 +47,7 @@ app.use(
 );
 
 // Security headers. CSP is intentionally not enabled here because the SPA is
-// served separately by Vercel's static layer; this API only emits JSON.
+// served separately by the web artifact; this API only emits JSON.
 app.use(
   helmet({
     contentSecurityPolicy: false,
@@ -84,8 +84,8 @@ const publicCors = cors({
     if (!origin) return cb(null, true);
     if (allowedOrigins === true) return cb(null, true);
     if (allowedOrigins.includes(origin)) return cb(null, true);
-    // Await on a cold-start cache so the first preflight on a fresh Vercel
-    // serverless instance doesn't 403 before the per-business origins load.
+    // Await on a cold-start cache so the first preflight on a fresh
+    // instance doesn't 403 before the per-business origins load.
     ensureBusinessAllowedOrigins()
       .then((origins) => {
         if (origins.has(origin)) return cb(null, true);

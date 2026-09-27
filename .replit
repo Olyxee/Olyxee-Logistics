@@ -1,4 +1,4 @@
-modules = ["nodejs-20", "web", "python-base-3.13"]
+modules = ["nodejs-20", "web", "php-8.2", "postgresql-16"]
 
 [deployment]
 router = "application"
@@ -9,6 +9,32 @@ args = ["pnpm", "store", "prune"]
 env = { "CI" = "true" }
 
 [workflows]
+runButton = "Project"
+
+[[workflows.workflow]]
+name = "Project"
+mode = "parallel"
+author = "agent"
+
+[[workflows.workflow.tasks]]
+task = "workflow.run"
+args = "artifacts/api-server: API Server"
+
+[[workflows.workflow.tasks]]
+task = "workflow.run"
+args = "artifacts/olyxee-admin: web"
+
+[[workflows.workflow]]
+name = "artifacts/api-server: API Server"
+author = "agent"
+
+[[workflows.workflow.tasks]]
+task = "shell.exec"
+args = "PORT=8080 pnpm --filter @workspace/api-server run dev"
+waitForPort = 8080
+
+[workflows.workflow.metadata]
+outputType = "console"
 
 [agent]
 stack = "BEST_EFFORT_FALLBACK"

@@ -22,6 +22,17 @@ const mockDb:any = {
 };
 vi.mock("@workspace/db", async(importOriginal)=>({...(await importOriginal<any>()),db:mockDb}));
 
+it("does not require the tracking database for unrelated API routes", async () => {
+  const app = express();
+  app.use((await import("../routes/public-tracking")).default);
+  app.get("/healthz", (_req, res) => res.json({ status: "ok" }));
+  mockDb.execute.mockClear();
+  const res = await request(app).get("/healthz");
+  expect(res.status).toBe(200);
+  expect(res.body).toEqual({ status: "ok" });
+  expect(mockDb.execute).not.toHaveBeenCalled();
+});
+
 it("keeps customer, invoice, supplier and staff data out of public tracking", async () => {
   const app=express();app.use((await import("../routes/public-tracking")).default);
   const res=await request(app).get("/public/track/OLY-ABC-2345");

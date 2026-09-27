@@ -1,0 +1,243 @@
+Sep 27 13:41:52.27
+POST
+500
+logistics.olyxee.com
+/api/auth/login
+Error [ERR_REQUIRE_ESM]: require() of ES Module /var/task/api/_bundle/app.mjs from /var/task/api/index.js not supported.
+ 
+Instead change the require of /var/task/api/_bundle/app.mjs to a dynamic import() which is available in all CommonJS modules.
+ 
+    at /opt/rust/nodejs.js:2:14482
+ 
+    at Module.Eo (/opt/rust/nodejs.js:2:14860)
+ 
+    at e.<computed>.ut._load (/opt/rust/nodejs.js:2:14452)
+ 
+    at a (/opt/rust/bytecode.js:2:1127) {
+ 
+  code: 'ERR_REQUIRE_ESM'
+ 
+}
+ 
+Node.js process exited with exit status: 1. The logs above can help with debugging the issue.
+Sep 27 13:41:36.79
+GET
+500
+logistics.olyxee.com
+/api/auth/forgot-password
+Error [ERR_REQUIRE_ESM]: require() of ES Module /var/task/api/_bundle/app.mjs from /var/task/api/index.js not supported.
+ 
+Instead change the require of /var/task/api/_bundle/app.mjs to a dynamic import() which is available in all CommonJS modules.
+ 
+    at /opt/rust/nodejs.js:2:14482
+ 
+    at Module.Eo (/opt/rust/nodejs.js:2:14860)
+ 
+    at e.<computed>.ut._load (/opt/rust/nodejs.js:2:14452)
+ 
+    at a (/opt/rust/bytecode.js:2:1127) {
+ 
+  code: 'ERR_REQUIRE_ESM'
+ 
+}
+ 
+Node.js process exited with exit status: 1. The logs above can help with debugging the issue.
+Sep 27 13:39:57.14
+GET
+500
+logistics.olyxee.com
+/api/auth/forgot-password
+Error [ERR_REQUIRE_ESM]: require() of ES Module /var/task/api/_bundle/app.mjs from /var/task/api/index.js not supported.
+ 
+Instead change the require of /var/task/api/_bundle/app.mjs to a dynamic import() which is available in all CommonJS modules.
+ 
+    at /opt/rust/nodejs.js:2:14482
+ 
+    at Module.Eo (/opt/rust/nodejs.js:2:14860)
+ 
+    at e.<computed>.ut._load (/opt/rust/nodejs.js:2:14452)
+ 
+    at a (/opt/rust/bytecode.js:2:1127) {
+ 
+  code: 'ERR_REQUIRE_ESM'
+ 
+}
+ 
+Node.js process exited with exit status: 1. The logs above can help with debugging the issue.
+Sep 27 13:39:50.53
+POST
+500
+logistics.olyxee.com
+/api/auth/login
+Error [ERR_REQUIRE_ESM]: require() of ES Module /var/task/api/_bundle/app.mjs from /var/task/api/index.js not supported.
+ 
+Instead change the require of /var/task/api/_bundle/app.mjs to a dynamic import() which is available in all CommonJS modules.
+ 
+    at /opt/rust/nodejs.js:2:14482
+ 
+    at Module.Eo (/opt/rust/nodejs.js:2:14860)
+ 
+    at e.<computed>.ut._load (/opt/rust/nodejs.js:2:14452)
+ 
+    at a (/opt/rust/bytecode.js:2:1127) {
+ 
+  code: 'ERR_REQUIRE_ESM'
+ 
+}
+ 
+Node.js process exited with exit status: 1. The logs above can help with debugging the issue.
+Sep 27 13:39:33.77
+POST
+500
+logistics.olyxee.com
+/api/auth/login
+Error [ERR_REQUIRE_ESM]: require() of ES Module /var/task/api/_bundle/app.mjs from /var/task/api/index.js not supported.
+ 
+Instead change the require of /var/task/api/_bundle/app.mjs to a dynamic import() which is available in all CommonJS modules.
+ 
+    at /opt/rust/nodejs.js:2:14482
+ 
+    at Module.Eo (/opt/rust/nodejs.js:2:14860)
+ 
+    at e.<computed>.ut._load (/opt/rust/nodejs.js:2:14452)
+ 
+    at a (/opt/rust/bytecode.js:2:1127) {
+ 
+  code: 'ERR_REQUIRE_ESM'
+ 
+}
+ 
+Node.js process exited with exit status: 1. The logs above can help with debugging the issue.
+Sep 27 13:38:55.13
+POST
+500
+logistics.olyxee.com
+/api/auth/login
+Error [ERR_REQUIRE_ESM]: require() of ES Module /var/task/api/_bundle/app.mjs from /var/task/api/index.js not supported.
+ 
+Instead change the require of /var/task/api/_bundle/app.mjs to a dynamic import() which is available in all CommonJS modules.
+ 
+    at /opt/rust/nodejs.js:2:14482
+ 
+    at Module.Eo (/opt/rust/nodejs.js:2:14860)
+ 
+    at e.<computed>.ut._load (/opt/rust/nodejs.js:2:14452)
+ 
+    at a (/opt/rust/bytecode.js:2:1127) {
+ 
+  code: 'ERR_REQUIRE_ESM'
+ 
+}
+ 
+Node.js process exited with exit status: 1. The logs above can help with debugging the issue.
+Sep 27 13:38:52.52
+GET
+500
+olyxee-logistics-api-server-5cuj8tzro-olyxee1.vercel.app
+/api/auth/me
+Error [ERR_REQUIRE_ESM]: require() of ES Module /var/task/api/_bundle/app.mjs from /var/task/api/index.js not supported.
+ 
+Instead change the require of /var/task/api/_bundle/app.mjs to a dynamic import() which is available in all CommonJS modules.
+ 
+    at /opt/rust/nodejs.js:2:14482
+ 
+    at Module.Eo (/opt/rust/nodejs.js:2:14860)
+ 
+    at e.<computed>.ut._load (/opt/rust/nodejs.js:2:14452)
+ 
+    at a (/opt/rust/bytecode.js:2:1127) {
+ 
+  code: 'ERR_REQUIRE_ESM'
+ 
+}
+ 
+Node.js process exited with exit status: 1. The logs above can help with debugging the issue.
+ 
+Error [ERR_REQUIRE_ESM]: require() of ES Module /var/task/api/_bundle/app.mjs from /var/task/api/index.js not supported.
+ 
+Instead change the require of /var/task/api/_bundle/app.mjs to a dynamic import() which is available in all CommonJS modules.
+ 
+    at /opt/rust/nodejs.js:2:14482
+ 
+    at Module.Eo (/opt/rust/nodejs.js:2:14860)
+ 
+    at e.<computed>.ut._load (/opt/rust/nodejs.js:2:14452)
+ 
+    at a (/opt/rust/bytecode.js:2:1127) {
+ 
+  code: 'ERR_REQUIRE_ESM'
+ 
+}
+ 
+Node.js process exited with exit status: 1. The logs above can help with debugging the issue.
+Sep 27 13:38:52.50
+GET
+500
+olyxee-logistics-api-server-5cuj8tzro-olyxee1.vercel.app
+/api/auth/me
+Error [ERR_REQUIRE_ESM]: require() of ES Module /var/task/api/_bundle/app.mjs from /var/task/api/index.js not supported.
+ 
+Instead change the require of /var/task/api/_bundle/app.mjs to a dynamic import() which is available in all CommonJS modules.
+ 
+    at /opt/rust/nodejs.js:2:14482
+ 
+    at Module.Eo (/opt/rust/nodejs.js:2:14860)
+ 
+    at e.<computed>.ut._load (/opt/rust/nodejs.js:2:14452)
+ 
+    at a (/opt/rust/bytecode.js:2:1127) {
+ 
+  code: 'ERR_REQUIRE_ESM'
+ 
+}
+ 
+Node.js process exited with exit status: 1. The logs above can help with debugging the issue.
+Sep 27 13:38:41.71
+POST
+500
+logistics.olyxee.com
+/api/auth/login
+Error [ERR_REQUIRE_ESM]: require() of ES Module /var/task/api/_bundle/app.mjs from /var/task/api/index.js not supported.
+ 
+Instead change the require of /var/task/api/_bundle/app.mjs to a dynamic import() which is available in all CommonJS modules.
+ 
+    at /opt/rust/nodejs.js:2:14482
+ 
+    at Module.Eo (/opt/rust/nodejs.js:2:14860)
+ 
+    at e.<computed>.ut._load (/opt/rust/nodejs.js:2:14452)
+ 
+    at a (/opt/rust/bytecode.js:2:1127) {
+ 
+  code: 'ERR_REQUIRE_ESM'
+ 
+}
+ 
+Node.js process exited with exit status: 1. The logs above can help with debugging the issue.
+Sep 27 13:38:35.61
+GET
+500
+logistics.olyxee.com
+/api/auth/login
+Error [ERR_REQUIRE_ESM]: require() of ES Module /var/task/api/_bundle/app.mjs from /var/task/api/index.js not supported.
+ 
+Instead change the require of /var/task/api/_bundle/app.mjs to a dynamic import() which is available in all CommonJS modules.
+ 
+    at /opt/rust/nodejs.js:2:14482
+ 
+    at Module.Eo (/opt/rust/nodejs.js:2:14860)
+ 
+    at e.<computed>.ut._load (/opt/rust/nodejs.js:2:14452)
+ 
+    at a (/opt/rust/bytecode.js:2:1127) {
+ 
+  code: 'ERR_REQUIRE_ESM'
+ 
+}
+ 
+Node.js process exited with exit status: 1. The logs above can help with debugging the issue.
+Sep 27 13:38:23.89
+GET
+500
+logistics.olyxee.com
+/api/auth/me
