@@ -152,7 +152,7 @@ export function getBusinessAllowedOrigins(): Set<string> {
 // Same as getBusinessAllowedOrigins, but on a serverless cold start (cache
 // never warmed yet) we AWAIT the first refresh instead of returning an empty
 // set and triggering a background fetch. Without this, the very first
-// cross-origin preflight on each cold Vercel function instance always 403s
+  // cross-origin preflight on each cold API instance would otherwise 403
 // because the cache hasn't been populated - every customer who happens to
 // hit a fresh instance sees "Tracking is temporarily unavailable".
 export async function ensureBusinessAllowedOrigins(): Promise<Set<string>> {
