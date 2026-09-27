@@ -13,3 +13,4 @@
 - [Plan catalog](plan-catalog.md) — IDs frozen (DB enum + codegen); catalog is Free + Scale (R1,499, billing starts 30 Sep 2026), pro/Growth retired, SMS removed; edit @workspace/plans, never hardcode names in JSX.
 - [GitHub writes from Replit](github-writes.md) — CLI pushes may lack credentials; use the connected GitHub SDK for atomic, fast-forward-only commits.
 - [API codegen compatibility](api-codegen-compatibility.md) — older Orval releases are blocked here; newer generation needs Zod 4 for generated schemas and DOM.Iterable for generated fetch clients.
+- [Vercel monorepo build cwd](vercel-monorepo-build-cwd.md) — Vercel can run the custom build from an artifact subdirectory; anchor root-relative commands to the workspace root.
