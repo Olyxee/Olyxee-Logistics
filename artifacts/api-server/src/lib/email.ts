@@ -13,7 +13,91 @@ function getResend(): Resend | null {
   return resendClient;
 }
 
+type EmailType = "invoice" | "tracking_update" | "password_reset";
+type EmailContext = {
+  businessId: string;
+  businessName?: string | null;
+  replyToEmail?: string | null;
+};
+type SendEmailRequest = EmailContext & {
+  emailType: EmailType;
+  recipient: string;
+  subject: string;
+  text: string;
+  html: string;
+  attachments?: { filename: string; content: Buffer }[];
+};
+type EmailResult = { success: boolean; messageId?: string; error?: string };
+
+function senderName(name?: string | null): string {
+  // Display names are tenant-controlled. Keep them out of header syntax.
+  return name?.replace(/[\x00-\x1f\x7f"\\<>]/g, " ").trim() || "Logistics";
+}
+
+function validEmail(value: string): boolean {
+  return /^[^\s@<>(),;]+@[^\s@<>(),;]+\.[^\s@<>(),;]+$/.test(value);
+}
+
+function getEmailSender(context: EmailContext): { from: string; replyTo: string } {
+  const email = process.env.EMAIL_FROM_ADDRESS?.trim();
+  if (!email || !validEmail(email)) {
+    throw new Error("EMAIL_FROM_ADDRESS must be a single verified email address without a display name");
+  }
+  const replyTo = context.replyToEmail?.trim();
+  return {
+    from: `${senderName(context.businessName)} <${email}>`,
+    replyTo: replyTo && validEmail(replyTo) ? replyTo : email,
+  };
+}
+
+async function sendEmail(request: SendEmailRequest): Promise<EmailResult> {
+  const { businessId, emailType, recipient } = request;
+  const resend = getResend();
+  if (!resend) {
+    logger.error({ businessId, emailType, recipient }, "RESEND_API_KEY is not configured; email not sent");
+    return { success: false, error: "Email provider not configured" };
+  }
+  let sender: ReturnType<typeof getEmailSender>;
+  try {
+    sender = getEmailSender(request);
+  } catch (err) {
+    logger.error({ businessId, emailType, recipient }, (err as Error).message);
+    return { success: false, error: "Email sender not configured" };
+  }
+  try {
+    const result = await resend.emails.send({
+      ...sender,
+      to: [recipient],
+      subject: request.subject,
+      text: request.text,
+      html: request.html,
+      ...(request.attachments ? { attachments: request.attachments } : {}),
+    });
+    if (result.error) {
+      const error = result.error as { statusCode?: number; name?: string; message?: string };
+      logger.error({
+        businessId, emailType, recipient,
+        resendStatusCode: error.statusCode,
+        resendErrorName: error.name,
+        resendErrorMessage: error.message,
+      }, "Resend rejected email");
+      return { success: false, error: error.message ?? "Failed to send email" };
+    }
+    return { success: true, messageId: result.data?.id };
+  } catch (err) {
+    const error = err as { statusCode?: number; name?: string; message?: string };
+    logger.error({
+      businessId, emailType, recipient,
+      resendStatusCode: error.statusCode,
+      resendErrorName: error.name,
+      resendErrorMessage: error.message,
+    }, "Resend email request failed");
+    return { success: false, error: "Failed to send email" };
+  }
+}
+
 export interface SendStatusEmailParams {
+  businessId: string;
   customerEmail: string;
   customerName: string;
   trackingId: string;
@@ -264,6 +348,9 @@ export function buildEmailBody(params: SendStatusEmailParams): { subject: string
 }
 
 export interface SendPasswordResetEmailParams {
+  businessId: string;
+  businessName?: string | null;
+  supportEmail?: string | null;
   to: string;
   name: string;
   resetLink: string;
@@ -273,32 +360,22 @@ export interface SendPasswordResetEmailParams {
 export async function sendPasswordResetEmail(
   p: SendPasswordResetEmailParams,
 ): Promise<{ success: boolean; messageId?: string; error?: string }> {
-  const resend = getResend();
-  if (!resend) {
-    logger.warn("Resend API key not configured - password reset email not sent");
-    return { success: false, error: "Email provider not configured" };
-  }
-  const fromAddress = process.env.EMAIL_FROM_ADDRESS;
-  if (!fromAddress) {
-    logger.warn("EMAIL_FROM_ADDRESS not configured - password reset email not sent");
-    return { success: false, error: "Email sender not configured" };
-  }
-  const from = `Olyxee <${fromAddress}>`;
   const safeLink = safeTrackingLink(p.resetLink);
   if (!safeLink) {
     return { success: false, error: "Invalid reset link" };
   }
-  const subject = "Reset your Olyxee password";
+  const businessName = senderName(p.businessName);
+  const subject = `Reset your ${businessName} password`;
   const text = [
     `Hi ${p.name || "there"},`,
     "",
-    "We received a request to reset your Olyxee password.",
+    `We received a request to reset your ${businessName} password.`,
     `This link expires in ${p.expiresInMinutes} minutes:`,
     safeLink,
     "",
     "If you didn't request this, you can safely ignore this email.",
     "",
-    "- Olyxee",
+    `- ${businessName}`,
   ].join("\n");
   const safeName = escapeHtml(p.name || "there");
   const safeUrl = escapeHtml(safeLink);
@@ -308,29 +385,16 @@ export async function sendPasswordResetEmail(
 <tr><td style="padding:32px;">
 <h1 style="margin:0 0 16px;font-size:22px;font-weight:700;">Reset your password</h1>
 <p style="margin:0 0 16px;font-size:15px;color:#27272a;">Hi ${safeName},</p>
-<p style="margin:0 0 16px;font-size:15px;color:#52525b;">We received a request to reset your Olyxee password. Click the button below to choose a new one. This link expires in ${p.expiresInMinutes} minutes.</p>
+  <p style="margin:0 0 16px;font-size:15px;color:#52525b;">We received a request to reset your ${escapeHtml(businessName)} password. Click the button below to choose a new one. This link expires in ${p.expiresInMinutes} minutes.</p>
 <p style="margin:0 0 16px;"><a href="${safeUrl}" style="display:inline-block;padding:12px 24px;background:#18181b;color:#ffffff;text-decoration:none;font-size:14px;font-weight:600;">Reset password</a></p>
 <p style="margin:0 0 16px;font-size:12px;color:#a1a1aa;word-break:break-all;">Or open: <a href="${safeUrl}" style="color:#52525b;text-decoration:underline;">${safeUrl}</a></p>
 <p style="margin:24px 0 0;font-size:13px;color:#71717a;">If you didn't request this, you can safely ignore this email - your password won't change.</p>
 </td></tr></table></td></tr></table></body></html>`;
-  try {
-    const result = await resend.emails.send({
-      from,
-      to: [p.to],
-      subject,
-      text,
-      html,
-    });
-    if (result.error) {
-      console.error("[email] resend error (reset):", result.error);
-      return { success: false, error: result.error.message };
-    }
-    return { success: true, messageId: result.data?.id };
-  } catch (err) {
-    const e = err as { message?: string; name?: string };
-    console.error("[email] exception (reset):", e?.name, e?.message);
-    return { success: false, error: "Failed to send email" };
-  }
+  return sendEmail({
+    businessId: p.businessId, businessName: p.businessName,
+    replyToEmail: p.supportEmail, emailType: "password_reset",
+    recipient: p.to, subject, text, html,
+  });
 }
 
 export async function sendStatusEmail(params: SendStatusEmailParams): Promise<{
@@ -338,55 +402,17 @@ export async function sendStatusEmail(params: SendStatusEmailParams): Promise<{
   messageId?: string;
   error?: string;
 }> {
-  const resend = getResend();
-
-  if (!resend) {
-    logger.warn("Resend API key not configured - email not sent");
-    return { success: false, error: "Email provider not configured" };
-  }
-
-  // Multi-tenant B2B sending: every email goes out from a single verified
-  // sender on our own domain, but the display name carries the business's
-  // brand and Reply-To points back to that business's support inbox so
-  // customer replies reach the right team.
-  const fromAddress = process.env.EMAIL_FROM_ADDRESS;
-  if (!fromAddress) {
-    logger.warn("EMAIL_FROM_ADDRESS not configured - email not sent");
-    return { success: false, error: "Email sender not configured" };
-  }
-
-  const escapedName = params.businessName.replace(/["\\]/g, " ").trim() || "Olyxee";
-  const from = `${escapedName} <${fromAddress}>`;
-  const replyTo = params.supportEmail && /.+@.+\..+/.test(params.supportEmail)
-    ? params.supportEmail
-    : undefined;
-
-  try {
-    const result = await resend.emails.send({
-      from,
-      to: [params.customerEmail],
-      subject: buildSubject(params),
-      text: buildText(params),
-      html: buildHtml(params),
-      ...(replyTo ? { replyTo } : {}),
-    });
-
-    if (result.error) {
-      console.error("[email] resend error:", result.error);
-      logger.error({ error: result.error }, "Failed to send email via Resend");
-      return { success: false, error: result.error.message };
-    }
-
-    return { success: true, messageId: result.data?.id };
-  } catch (err) {
-    const e = err as { message?: string; name?: string };
-    console.error("[email] exception:", e?.name, e?.message);
-    logger.error({ err }, "Exception sending email");
-    return { success: false, error: "Failed to send email" };
-  }
+  return sendEmail({
+    businessId: params.businessId, businessName: params.businessName,
+    replyToEmail: params.supportEmail, emailType: "tracking_update",
+    recipient: params.customerEmail, subject: buildSubject(params),
+    text: buildText(params), html: buildHtml(params),
+  });
 }
 
 export interface SendInvoiceEmailParams {
+  businessId: string;
+  senderBusinessName?: string | null;
   customerEmail: string; customerName: string; customerAddress?: string | null; customerPhone?: string | null;
   invoiceNumber: string; createdAt: Date; dueDate: Date; description: string;
   serviceDetails: string; quantity: number; subtotal: number; additionalCharges: number;
@@ -399,17 +425,12 @@ export interface SendInvoiceEmailParams {
 }
 
 export async function sendInvoiceEmail(p: SendInvoiceEmailParams): Promise<{success:boolean;messageId?:string;error?:string}> {
-  const resend=getResend();
-  if(!resend)return {success:false,error:"Email provider not configured"};
-  const fromAddress=process.env.EMAIL_FROM_ADDRESS;
-  if(!fromAddress)return {success:false,error:"Email sender not configured"};
   // Base64 data URLs are supported by the PDF generator, but embedding them
   // in email HTML can make Resend reject the message or be stripped by inbox
   // clients. Only remote HTTP(S) logos are safe in the email body; the branded
   // PDF attachment still receives p.logoUrl unchanged.
   const emailLogo=/^https?:\/\//i.test(p.logoUrl||"")?p.logoUrl||"":"";
   const logo=emailLogo?`<img src="${escapeHtml(emailLogo)}" alt="${escapeHtml(p.businessName)}" style="display:block;max-width:150px;max-height:52px;object-fit:contain">`:`<strong style="font-size:19px;color:#1a1a1a">${escapeHtml(p.businessName)}</strong>`;
-  const replyTo=p.supportEmail&&/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(p.supportEmail.trim())?p.supportEmail.trim():undefined;
   const emailHtml=`<!doctype html><html><body style="margin:0;background:#ffffff;padding:40px 24px;font-family:Arial,Helvetica,sans-serif;color:#1f2937;line-height:1.65">
 <div style="display:none;max-height:0;overflow:hidden;opacity:0">Your PDF invoice is attached.</div>
 <div style="max-width:620px;margin:0 auto">
@@ -426,9 +447,17 @@ export async function sendInvoiceEmail(p: SendInvoiceEmailParams): Promise<{succ
   try{
     const { buildInvoicePdf } = await import("./invoice-pdf");
     const pdf = await buildInvoicePdf(p);
-    const senderName=p.businessName.replace(/["\\]/g," ").trim()||"Olyxee";
-    const result=await resend.emails.send({from:`${senderName} <${fromAddress}>`,to:[p.customerEmail],subject:`Your invoice from ${senderName}`,html:emailHtml,text,...(replyTo?{replyTo}:{}),attachments:[{filename:`${p.invoiceNumber}.pdf`,content:pdf}]});
-    if(result.error){logger.error({error:result.error,invoiceNumber:p.invoiceNumber},"Failed to send invoice via Resend");return {success:false,error:result.error.message};}
-    return {success:true,messageId:result.data?.id};
-  }catch(err){logger.error({err,invoiceNumber:p.invoiceNumber},"Exception generating or sending invoice email");return {success:false,error:"Failed to send invoice email"};}
+    return sendEmail({
+      businessId:p.businessId,businessName:p.senderBusinessName ?? p.businessName,
+      replyToEmail:p.supportEmail,emailType:"invoice",recipient:p.customerEmail,
+      // Preserve the invoice legal-name subject; only the From display name
+      // uses the workspace's current business name.
+      subject:`Your invoice from ${senderName(p.businessName)}`,
+      html:emailHtml,text,attachments:[{filename:`${p.invoiceNumber}.pdf`,content:pdf}],
+    });
+  }catch(err){
+    const error=err as {name?:string;message?:string};
+    logger.error({businessId:p.businessId,emailType:"invoice",recipient:p.customerEmail,errorName:error.name,errorMessage:error.message},"Failed to generate invoice email");
+    return {success:false,error:"Failed to send invoice email"};
+  }
 }

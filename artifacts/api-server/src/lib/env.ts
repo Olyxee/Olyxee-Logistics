@@ -34,13 +34,13 @@ const RECOMMENDED: EnvCheck[] = [
   {
     name: "RESEND_API_KEY",
     required: false,
-    description: "Resend API key - order status emails will be skipped without it.",
+    description: "Resend API key - all transactional emails are skipped without it.",
   },
   {
     name: "EMAIL_FROM_ADDRESS",
     required: false,
     description:
-      "Verified sender address on your own domain (e.g. notifications@yourdomain.com). Required for outbound email; the business name is used as the display name and the business's support email as Reply-To.",
+      "Plain sender address on a Resend-verified platform domain (e.g. notifications@logistics.olyxee.com). Required for outbound email; each business supplies the display name and Reply-To.",
   },
 ];
 

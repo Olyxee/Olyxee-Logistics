@@ -1,0 +1,229 @@
+Fix the Resend email implementation in this B2B multi-tenant logistics platform.
+
+Current production error:
+
+```text
+[email] resend error:
+statusCode: 403
+message: "The logistics.olyxee.com domain is not verified."
+name: "validation_error"
+```
+
+The platform is used by multiple businesses, so email sender configuration must NOT be hardcoded to Olyxee or to individual businesses through environment variables.
+
+Implement the following architecture:
+
+1. Use one platform-level verified sender email as the default sender:
+
+```env
+EMAIL_FROM_ADDRESS=notifications@logistics.olyxee.com
+RESEND_API_KEY=...
+```
+
+Do not store the business display name inside `EMAIL_FROM_ADDRESS`.
+
+2. The sender display name must come dynamically from the currently authenticated tenant/business.
+
+For example:
+
+```text
+ABC Freight <notifications@logistics.olyxee.com>
+FastCargo <notifications@logistics.olyxee.com>
+XYZ Logistics <notifications@logistics.olyxee.com>
+```
+
+The actual email domain remains the verified platform domain, while the visible sender name changes per business.
+
+3. Update the Resend sending logic to follow this pattern:
+
+```ts
+const senderEmail = process.env.EMAIL_FROM_ADDRESS;
+
+const senderName =
+  tenant?.businessName ||
+  tenant?.name ||
+  "Logistics";
+
+await resend.emails.send({
+  from: `${senderName} <${senderEmail}>`,
+  to,
+  subject,
+  html,
+  replyTo: tenant?.email || senderEmail,
+});
+```
+
+Adapt this to the existing database models and naming conventions in the project. Do not blindly create a new tenant model if one already exists.
+
+4. Find all email sending code in the application and make sure every Resend call uses the same centralized sender logic.
+
+This includes, where applicable:
+
+- invoices
+- quotations
+- order confirmations
+- tracking updates
+- payment notifications
+- delivery notifications
+- customer invitations
+- staff/admin notifications
+- password/auth emails if they use Resend
+- any other transactional emails
+
+5. Create or improve a centralized email helper/service so email sender construction is not duplicated across the codebase.
+
+For example:
+
+```ts
+function getEmailSender(business) {
+  const email = process.env.EMAIL_FROM_ADDRESS;
+
+  if (!email) {
+    throw new Error("EMAIL_FROM_ADDRESS is not configured");
+  }
+
+  const name =
+    business?.name ||
+    business?.businessName ||
+    "Logistics";
+
+  return {
+    from: `${name} <${email}>`,
+    replyTo: business?.email || email,
+  };
+}
+```
+
+Use the project's existing architecture and coding style.
+
+6. Important multi-tenant requirement:
+
+Never allow Business A's branding, email address, or company name to appear in Business B's emails.
+
+The business/tenant must always be resolved from the current authenticated organization/order/customer context.
+
+Verify tenant isolation carefully.
+
+7. Do NOT dynamically use a customer's own domain in the `from` address unless that domain has explicitly been verified with Resend.
+
+For now:
+
+```text
+Business Name <notifications@logistics.olyxee.com>
+```
+
+is correct.
+
+Do NOT do this automatically:
+
+```text
+Business Name <notifications@customer-domain.com>
+```
+
+because Resend will reject unverified domains.
+
+8. Use the tenant's email as `replyTo` where appropriate so customer replies go directly to that business.
+
+Example:
+
+```text
+From:
+ABC Freight <notifications@logistics.olyxee.com>
+
+Reply-To:
+operations@abcfreight.co.za
+```
+
+9. Add safe fallbacks.
+
+If the tenant/business name is missing:
+
+```text
+Logistics <notifications@logistics.olyxee.com>
+```
+
+If the tenant reply-to email is unavailable, use `EMAIL_FROM_ADDRESS`.
+
+10. Validate environment variables on startup or before sending email.
+
+If either is missing:
+
+```text
+RESEND_API_KEY
+EMAIL_FROM_ADDRESS
+```
+
+log a clear configuration error.
+
+Do not expose API keys in logs.
+
+11. Improve error logging around Resend.
+
+Log useful information such as:
+
+```ts
+{
+  businessId,
+  emailType,
+  recipient,
+  resendStatusCode,
+  resendErrorName,
+  resendErrorMessage
+}
+```
+
+Do not log secrets or sensitive email contents.
+
+12. Search the entire repository for old sender formats such as:
+
+```text
+@logistics.olyxee.com
+Olyxee Logistics <
+EMAIL_FROM
+FROM_EMAIL
+RESEND_FROM
+```
+
+and consolidate them into the centralized implementation.
+
+13. Do not break existing invoice, order, tracking, payment, or quote flows.
+
+After changes, test at least these scenarios:
+
+- Business A sends an invoice
+- Business B sends an invoice
+- Business A sends a tracking update
+- Business B sends a quote
+- missing tenant reply-to email
+- missing business name
+- missing `EMAIL_FROM_ADDRESS`
+- Resend API failure
+
+Expected result:
+
+```text
+Business A
+From: Business A <notifications@logistics.olyxee.com>
+
+Business B
+From: Business B <notifications@logistics.olyxee.com>
+```
+
+with proper tenant isolation.
+
+Also prepare the codebase for a future custom-domain feature, where a business may eventually verify something like:
+
+```text
+notifications.business-domain.co.za
+```
+
+But do not implement unverified custom-domain sending now.
+
+Finally, show me:
+
+1. Which files were changed
+2. What the old implementation was doing wrong
+3. The new centralized email architecture
+4. Any database fields being used for business name and reply-to email
+5. Any environment variables I need to set
+6. Any remaining Resend/DNS steps that must be completed outside the code
