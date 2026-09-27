@@ -1,0 +1,60 @@
+Sep 27 15:55:22.58
+POST
+401
+logistics.olyxee.com
+/api/auth/login
+2
+(node:4) [DEP0169] DeprecationWarning: `url.parse()` behavior is not standardized and prone to errors that have security implications. Use the WHATWG URL API instead. CVEs are not issued for `url.parse()` vulnerabilities.
+Sep 27 15:52:47.96
+POST
+200
+logistics.olyxee.com
+/api/auth/forgot-password
+{"level":30,"time":1790517168649,"pid":4,"hostname":"169.254.54.51","req":{"id":9,"method":"POST","url":"/api/auth/forgot-password"},"res":{"statusCode":200},"responseTime":546,"msg":"request completed"}
+Sep 27 15:52:35.60
+POST
+401
+logistics.olyxee.com
+/api/auth/login
+{"level":30,"time":1790517156296,"pid":4,"hostname":"169.254.54.51","req":{"id":8,"method":"POST","url":"/api/auth/login"},"res":{"statusCode":401},"responseTime":555,"msg":"request completed"}
+Sep 27 15:52:27.55
+POST
+400
+logistics.olyxee.com
+/api/auth/login
+{"level":30,"time":1790517147700,"pid":4,"hostname":"169.254.54.51","req":{"id":7,"method":"POST","url":"/api/auth/login"},"res":{"statusCode":400},"responseTime":2,"msg":"request completed"}
+Sep 27 15:52:08.46
+POST
+401
+logistics.olyxee.com
+/api/auth/login
+{"level":30,"time":1790517129153,"pid":4,"hostname":"169.254.54.51","req":{"id":6,"method":"POST","url":"/api/auth/login"},"res":{"statusCode":401},"responseTime":555,"msg":"request completed"}
+Sep 27 15:52:01.19
+GET
+401
+logistics.olyxee.com
+/api/auth/me
+{"level":30,"time":1790517121340,"pid":4,"hostname":"169.254.54.51","req":{"id":5,"method":"GET","url":"/api/auth/me"},"res":{"statusCode":401},"responseTime":1,"msg":"request completed"}
+Sep 27 15:51:11.92
+POST
+401
+logistics.olyxee.com
+/api/auth/login
+{"level":30,"time":1790517072720,"pid":4,"hostname":"169.254.54.51","req":{"id":4,"method":"POST","url":"/api/auth/login"},"res":{"statusCode":401},"responseTime":740,"msg":"request completed"}
+Sep 27 15:51:11.77
+GET
+401
+logistics.olyxee.com
+/api/auth/me
+{"level":30,"time":1790517071823,"pid":4,"hostname":"169.254.54.51","req":{"id":3,"method":"GET","url":"/api/auth/me"},"res":{"statusCode":401},"responseTime":2,"msg":"request completed"}
+Sep 27 15:51:11.58
+GET
+200
+logistics.olyxee.com
+/api/healthz
+{"level":30,"time":1790517071686,"pid":4,"hostname":"169.254.54.51","req":{"id":2,"method":"GET","url":"/api/healthz"},"res":{"statusCode":200},"responseTime":2,"msg":"request completed"}
+Sep 27 15:51:00.84
+GET
+200
+logistics.olyxee.com
+/api/healthz
