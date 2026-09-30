@@ -166,7 +166,7 @@ export type SubscriptionStatus =
 export const featureFlags = {
   // SMS is fully removed from the product for now (pricing, notifications,
   // settings). The dormant code paths stay behind this flag.
-  smsNotifications: false,
+  smsNotifications: true,
   subscriptionBilling: false,
   planEnforcement: false,
   businessBranding: false,
