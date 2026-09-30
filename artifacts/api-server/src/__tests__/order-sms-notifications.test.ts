@@ -33,6 +33,14 @@ vi.mock("../lib/sms", () => smsMock);
 const usageMock = vi.hoisted(() => ({ getMonthlySmsUsage: vi.fn() }));
 vi.mock("../lib/sms-usage", () => usageMock);
 
+// lib/order-notifications.ts calls findRecentDuplicateSms (lib/sms-dedup.ts,
+// a db.select query) before sending. Mock the dedup module directly rather
+// than reimplementing drizzle's query chain here - defaults to "no recent
+// duplicate" so existing tests are unaffected; the dedup describe block below
+// overrides this per-case to exercise both outcomes.
+const dedupMock = vi.hoisted(() => ({ findRecentDuplicateSms: vi.fn() }));
+vi.mock("../lib/sms-dedup", () => dedupMock);
+
 import { sendOrderSms } from "../lib/order-notifications";
 
 const BASE_PARAMS = {
@@ -49,6 +57,7 @@ const BASE_PARAMS = {
 beforeEach(() => {
   vi.clearAllMocks();
   inserted.length = 0;
+  dedupMock.findRecentDuplicateSms.mockResolvedValue(null);
 });
 
 afterEach(() => {
@@ -178,43 +187,52 @@ describe("sendOrderSms — recipient, template content, and single-send guarante
   });
 });
 
-describe("sendOrderSms — duplicate protection (GAP: none exists)", () => {
-  // There is no idempotency key, no unique constraint on sms_notifications,
-  // and no "already notified for this status" check anywhere in
-  // sendOrderSms() or the sms_notifications schema. Calling this twice with
-  // identical parameters - e.g. a double-click, a client retry after a
-  // dropped response, or two concurrent requests - sends two SMS. The
-  // /orders/:orderId/status route's own forward-progression guard even
-  // explicitly allows re-setting the SAME status (`targetIndex >= currentIndex`
-  // in lib/order-statuses/src/logistics.ts), so this is reachable in
-  // production, not just a theoretical unit-test scenario.
-  it("BUG: sends the SAME notification twice when triggered twice with identical params", async () => {
+// CORRECTED 2026-09-30: this block originally documented duplicate SMS as an
+// unfixed gap ("BUG: sends twice, no dedupe"). That was true against an
+// earlier snapshot of main; current main includes lib/sms-dedup.ts
+// (findRecentDuplicateSms, a 5-minute same-order+same-body+status=sent
+// window) wired into sendOrderSms, plus a skipDuplicateCheck escape hatch
+// for the explicit resend path. Equivalent, passing coverage for this also
+// lives in order-notifications.test.ts ("skips a retried send..." /
+// "bypasses the duplicate check...") - kept here too since this file already
+// exists, updated to match reality instead of asserting the old bug.
+describe("sendOrderSms — duplicate protection (fixed: lib/sms-dedup.ts)", () => {
+  it("does NOT send a second SMS when a recent identical send is found", async () => {
     smsMock.isSmsConfigured.mockReturnValue(true);
     usageMock.getMonthlySmsUsage.mockResolvedValue(0);
-    smsMock.sendSms.mockResolvedValue({ success: true, providerMessageId: "msg-dup" });
-
-    const first = await sendOrderSms({ ...BASE_PARAMS, businessPlan: "beta" });
-    const second = await sendOrderSms({ ...BASE_PARAMS, businessPlan: "beta" });
-
-    expect(first.smsStatus).toBe("sent");
-    expect(second.smsStatus).toBe("sent"); // no dedupe: sends again
-    expect(smsMock.sendSms).toHaveBeenCalledTimes(2);
-    expect(inserted).toHaveLength(2);
-  });
-
-  it("the explicit resend path (POST /orders/:orderId/resend-email) is intentional and does send again", async () => {
-    // This is the SAME sendOrderSms() call as the status-update path - there
-    // is no separate "resend" flag or bypass, because there is no dedupe to
-    // bypass in the first place. Documenting current behaviour: an explicit
-    // resend does successfully send a fresh SMS, which is the desired part
-    // of Step 4's scope, but it works only because nothing was blocking a
-    // resend to begin with.
-    smsMock.isSmsConfigured.mockReturnValue(true);
-    usageMock.getMonthlySmsUsage.mockResolvedValue(0);
-    smsMock.sendSms.mockResolvedValue({ success: true, providerMessageId: "msg-resend" });
+    dedupMock.findRecentDuplicateSms.mockResolvedValue({ id: "sms-notif-prior" });
 
     const result = await sendOrderSms({ ...BASE_PARAMS, businessPlan: "beta" });
 
+    expect(result.smsStatus).toBe("skipped");
+    expect(result.smsNotificationId).toBe("sms-notif-prior");
+    expect(smsMock.sendSms).not.toHaveBeenCalled();
+    expect(inserted).toHaveLength(0); // no new row written for a deduped send
+  });
+
+  it("does send when no recent duplicate is found (normal, non-duplicate case)", async () => {
+    smsMock.isSmsConfigured.mockReturnValue(true);
+    usageMock.getMonthlySmsUsage.mockResolvedValue(0);
+    dedupMock.findRecentDuplicateSms.mockResolvedValue(null);
+    smsMock.sendSms.mockResolvedValue({ success: true, providerMessageId: "msg-first" });
+
+    const result = await sendOrderSms({ ...BASE_PARAMS, businessPlan: "beta" });
+
+    expect(result.smsStatus).toBe("sent");
+    expect(smsMock.sendSms).toHaveBeenCalledTimes(1);
+  });
+
+  it("the explicit resend path bypasses the duplicate check via skipDuplicateCheck", async () => {
+    smsMock.isSmsConfigured.mockReturnValue(true);
+    usageMock.getMonthlySmsUsage.mockResolvedValue(0);
+    // Even though a matching recent send exists, skipDuplicateCheck must
+    // stop findRecentDuplicateSms from being consulted at all.
+    dedupMock.findRecentDuplicateSms.mockResolvedValue({ id: "sms-notif-prior" });
+    smsMock.sendSms.mockResolvedValue({ success: true, providerMessageId: "msg-resend" });
+
+    const result = await sendOrderSms({ ...BASE_PARAMS, businessPlan: "beta", skipDuplicateCheck: true });
+
+    expect(dedupMock.findRecentDuplicateSms).not.toHaveBeenCalled();
     expect(result.smsStatus).toBe("sent");
     expect(smsMock.sendSms).toHaveBeenCalledTimes(1);
   });
@@ -265,14 +283,7 @@ describe("sendOrderSms — edge cases", () => {
   });
 });
 
-describe("Invoice SMS notifications (Step 3 scope)", () => {
-  it("NOT IMPLEMENTED: no invoice route or lib module sends SMS at all", () => {
-    // artifacts/api-server/src/routes/invoices.ts imports only sendInvoiceEmail
-    // from ../lib/email. There is no sendInvoiceSms, no SMS import, and no
-    // reference to ../lib/sms anywhere in the invoices route or in any
-    // invoice-related lib file. Invoice notifications are email-only today.
-    // This test exists so the gap shows up as a named, tracked test rather
-    // than silent missing coverage - see the test report for the recommendation.
-    expect(true).toBe(true);
-  });
-});
+// CORRECTED 2026-09-30: invoice SMS is now implemented (lib/invoice-notifications.ts,
+// sendInvoiceSms, wired into routes/invoices.ts's POST /invoices/:id/send) with
+// its own full test file at src/__tests__/invoice-notifications.test.ts
+// (recipient/template/dedup/limit/resend coverage). No placeholder needed here.
