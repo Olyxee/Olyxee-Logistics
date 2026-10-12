@@ -5,10 +5,15 @@ import { sql } from "drizzle-orm";
 
 const router: IRouter = Router();
 
-router.get("/healthz", (_req, res) => {
+// Both /healthz and /health serve the liveness probe. /health is aliased
+// to prevent 404s from standard external infrastructure probes or monitoring.
+const healthHandler = (_req: unknown, res: any) => {
   const data = HealthCheckResponse.parse({ status: "ok" });
   res.json(data);
-});
+};
+
+router.get("/healthz", healthHandler);
+router.get("/health", healthHandler);
 
 router.get("/readyz", async (req, res) => {
   try {
