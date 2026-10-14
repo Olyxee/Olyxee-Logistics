@@ -26,21 +26,55 @@ function initPool(): pg.Pool {
     );
   }
 
-  // Read the connection's `sslmode` (if present), then strip it from the URL.
-  // node-postgres now treats `sslmode=require` as `verify-full` (strict cert
-  // verification), which would override the explicit `ssl` config below and
-  // fail against providers like Supabase that present a self-signed cert in
-  // the chain (SELF_SIGNED_CERT_IN_CHAIN). We re-derive SSL ourselves so the
-  // explicit `ssl` setting is authoritative.
+  // Validate connection URL formatting and detect unencoded special characters in password.
+  // In connection URIs (postgres://user:password@host...), characters such as '#', '/', '?', or a
+  // stray '%' not followed by two hex digits break standard URL parsing (e.g. '#' truncates the host
+  // into a hash fragment; '/' or '?' alters the path or query parameters). Special characters in the
+  // password must be percent-encoded (e.g. '%23' for '#', '%2F' for '/', '%3F' for '?', '%25' for '%').
+  // Note: unencoded '@' is parsed as userinfo delimiter by WHATWG/pg, but '#' / '/' / '?' fail driver resolution.
   let sslmode: string | null = null;
   let connectionString = dbUrl;
   try {
-    const u = new URL(dbUrl);
+    let u: URL;
+    try {
+      u = new URL(dbUrl);
+    } catch (urlErr) {
+      // WHATWG URL parser rejects empty hostname with userinfo (e.g. postgresql://user:pass@/db?host=/path)
+      // Allow fallback parsing if a socket `host` parameter is supplied:
+      if (dbUrl.includes("?host=") || dbUrl.includes("&host=")) {
+        u = new URL(dbUrl.replace("://", "://socket-placeholder/"));
+      } else {
+        throw urlErr;
+      }
+    }
+
     sslmode = u.searchParams.get("sslmode");
-    u.searchParams.delete("sslmode");
-    connectionString = u.toString();
-  } catch {
-    // Not a parseable URL (rare); fall back to the raw value unchanged.
+    if (u.hostname !== "socket-placeholder") {
+      u.searchParams.delete("sslmode");
+      connectionString = u.toString();
+    }
+
+    // Check for stray '%' in the password not followed by two hex digits:
+    if (u.password && /%(?![0-9A-Fa-f]{2})/.test(u.password)) {
+      throw new Error(
+        "Invalid database connection URL: malformed percent-encoding in password. Special characters (such as '#', '/', '?', or stray '%') must be percent-encoded (e.g. '%23' for '#', '%2F' for '/', '%3F' for '?', '%25' for '%').",
+      );
+    }
+
+    // Secondary check: verify that host is present (either via hostname or socket-style `host` query param)
+    const hasHost = Boolean((u.hostname && u.hostname !== "socket-placeholder") || u.searchParams.get("host"));
+    if (!hasHost) {
+      throw new Error(
+        "Invalid database connection URL: missing host. Special characters in the password (such as '#', '/', '?', or stray '%') must be percent-encoded (e.g. '%23' for '#', '%2F' for '/', '%3F' for '?').",
+      );
+    }
+  } catch (err: unknown) {
+    if (err instanceof Error && err.message.startsWith("Invalid database connection URL")) {
+      throw err;
+    }
+    throw new Error(
+      "Invalid database connection URL format. Ensure the URL is valid and special characters in the password (such as '#', '/', '?', or stray '%') are percent-encoded.",
+    );
   }
 
   // Decide SSL:
