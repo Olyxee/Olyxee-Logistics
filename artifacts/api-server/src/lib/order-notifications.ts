@@ -24,6 +24,7 @@ export async function sendOrderSms(params: {
   trackingLink: string;
   businessPlan: PlanId;
   businessId: string;
+  bodyOverride?: string;
   // The manual "resend" action deliberately wants a fresh send even if an
   // identical message already went out - only the automatic status-change
   // path (which a retried request could trigger twice) dedupes by default.
@@ -40,6 +41,7 @@ export async function sendOrderSms(params: {
     businessPlan,
     businessId,
     skipDuplicateCheck,
+    bodyOverride,
   } = params;
 
   let smsStatus: SendOrderSmsResult["smsStatus"] = "skipped";
@@ -47,68 +49,75 @@ export async function sendOrderSms(params: {
   let smsUsage: number | undefined;
   let smsLimit: number | null | undefined;
 
-  if (customerPhone && isSmsConfigured()) {
-    const smsBody = buildSmsBody({
-      businessName,
-      trackingId,
-      status,
-      statusMessage,
-      trackingLink,
-      customerPhone,
-    });
+  if (!isSmsConfigured()) {
+    return { smsStatus, smsNotificationId, smsUsage, smsLimit };
+  }
 
-    if (!skipDuplicateCheck) {
-      const duplicate = await findRecentDuplicateSms(orderId, smsBody);
-      if (duplicate) {
-        logger.info(
-          { orderId, smsNotificationId: duplicate.id },
-          "Skipping SMS send - identical message already sent recently for this order",
-        );
-        return {
-          smsStatus: "skipped",
-          smsNotificationId: duplicate.id,
-          smsUsage: undefined,
-          smsLimit: undefined,
-        };
-      }
+  if (!customerPhone || !customerPhone.trim()) {
+    logger.warn({ orderId }, "Order SMS skipped: customer phone number is missing");
+    return { smsStatus, smsNotificationId, smsUsage, smsLimit };
+  }
+
+  const smsBody = bodyOverride ?? buildSmsBody({
+    businessName,
+    trackingId,
+    status,
+    statusMessage,
+    trackingLink,
+    customerPhone,
+  });
+
+  if (!skipDuplicateCheck) {
+    const duplicate = await findRecentDuplicateSms(orderId, smsBody);
+    if (duplicate) {
+      logger.info(
+        { orderId, smsNotificationId: duplicate.id },
+        "Skipping SMS send - identical message already sent recently for this order",
+      );
+      return {
+        smsStatus: "skipped",
+        smsNotificationId: duplicate.id,
+        smsUsage: undefined,
+        smsLimit: undefined,
+      };
     }
+  }
 
-    smsLimit = getPlan(businessPlan).smsLimit ?? null;
-    smsUsage = await getMonthlySmsUsage(businessId);
+  smsLimit = getPlan(businessPlan).smsLimit ?? null;
+  smsUsage = await getMonthlySmsUsage(businessId);
 
-    if (smsLimit !== null && smsUsage >= smsLimit) {
-      smsStatus = "limit_reached";
-      const notif = await db
-        .insert(smsNotificationsTable)
-        .values({
-          id: generateId(),
-          orderId,
-          customerPhone,
-          body: smsBody,
-          status: "limit_reached",
-          providerMessageId: null,
-        })
-        .returning();
-      smsNotificationId = notif[0]?.id;
-    } else {
-      const smsResult = await sendSms({ to: customerPhone, body: smsBody });
-      const smsProviderMessageId = smsResult.success ? smsResult.providerMessageId : null;
-      smsStatus = smsResult.success ? "sent" : "failed";
-      if (smsStatus === "sent") smsUsage = (smsUsage ?? 0) + 1;
+  if (smsLimit !== null && smsUsage >= smsLimit) {
+    smsStatus = "limit_reached";
+    const notif = await db
+      .insert(smsNotificationsTable)
+      .values({
+        id: generateId(),
+        orderId,
+        customerPhone,
+        body: smsBody,
+        status: "limit_reached",
+        providerMessageId: null,
+      })
+      .returning();
+    smsNotificationId = notif[0]?.id;
+  } else {
+    const smsResult = await sendSms({ to: customerPhone, body: smsBody });
+    const smsProviderMessageId = smsResult.success ? smsResult.providerMessageId : null;
+    smsStatus = smsResult.success ? "sent" : "failed";
+    if (smsStatus === "sent") smsUsage = (smsUsage ?? 0) + 1;
 
-      const notif = await db
-        .insert(smsNotificationsTable)
-        .values({
-          id: generateId(),
-          orderId,
-          customerPhone,
-          body: smsBody,
-          status: smsStatus,
-          providerMessageId: smsProviderMessageId,
-        })
-        .returning();
-      smsNotificationId = notif[0]?.id;
-    }
+    const notif = await db
+      .insert(smsNotificationsTable)
+      .values({
+        id: generateId(),
+        orderId,
+        customerPhone,
+        body: smsBody,
+        status: smsStatus,
+        providerMessageId: smsProviderMessageId,
+      })
+      .returning();
+    smsNotificationId = notif[0]?.id;
   }
 
   return { smsStatus, smsNotificationId, smsUsage, smsLimit };

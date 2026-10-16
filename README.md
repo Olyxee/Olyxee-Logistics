@@ -123,6 +123,11 @@ Password: demo
 
 Production infrastructure should use `/api/readyz` for readiness and `/api/healthz` for liveness.
 
+## Production SMS deployment
+
+SMS lifecycle notification configuration, rollout checks, and live-send
+verification are documented in [the SMS production deployment runbook](./docs/sms-production-deployment.md).
+
 ## Tests and verification
 
 Run all available tests:

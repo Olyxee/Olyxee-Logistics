@@ -7,6 +7,8 @@ import { generateId } from "../lib/id";
 import { canConfirmInvoicePaid } from "../lib/invoice-workflow";
 import { sendInvoiceEmail } from "../lib/email";
 import { sendInvoiceSms } from "../lib/invoice-notifications";
+import { sendOrderSms } from "../lib/order-notifications";
+import { buildLifecycleSmsBody } from "../lib/sms-templates";
 import { ensureFinanceSchema } from "./finance";
 
 const router = Router();
@@ -122,21 +124,27 @@ router.post("/invoices/:invoiceId/send",requireAuth,async(req,res)=>{
   // its current Branding logo; invoiceLogoUrl remains a legacy fallback for
   // businesses that uploaded a logo before the shared branding profile existed.
   const sent=await sendInvoiceEmail({businessId,senderBusinessName:business.name,customerEmail:customer.email,customerName:customer.fullName,customerAddress:customer.address,customerPhone:customer.phone,invoiceNumber:invoice.invoiceNumber,createdAt:invoice.createdAt,dueDate:invoice.dueDate??invoice.createdAt,description:order.cargoType||order.description||"Cross-border logistics service",serviceDetails:order.serviceRequired||"",quantity:1,subtotal:Number(invoice.subtotal),additionalCharges:Number(invoice.additionalCharges),total:Number(invoice.total),currency:invoice.currency,businessName:business.invoiceLegalName||business.name,supportEmail:business.invoiceEmail||business.supportEmail,businessPhone:business.invoicePhone||business.phone,businessAddress:business.invoiceAddress||business.location,logoUrl:business.businessLogoUrl||business.invoiceLogoUrl,companyRegistration:business.invoiceRegistrationNumber||undefined,taxNumber:business.invoiceTaxNumber,paymentDetails:business.invoicePaymentDetails,paymentTerms:business.invoicePaymentTerms,footerNote:business.invoiceFooterNote,primaryColor:business.primaryBrandColour,orderReference:order.orderReference,jobNumber:order.jobNumber,trackingId:order.trackingId,externalTrackingNumber:order.supplierTrackingNumber,origin:order.origin,destination:order.destination,transportMode:order.transportMode,weight:order.weight});
-  if(!sent.success){
-    req.log.error({invoiceId:id,businessId,customerId:customer.id,reason:sent.error||"unknown"},"Invoice email delivery failed");
-    res.status(502).json({error:sent.error||"Invoice email failed"});return;
-  }
-  const now=new Date();const [updated]=await db.update(invoicesTable).set({status:"sent",sentAt:now,updatedAt:now}).where(and(eq(invoicesTable.id,id),eq(invoicesTable.businessId,businessId))).returning();
-  // Invoice sent -> billing_status AWAITING_PAYMENT (shipment status untouched).
-  await db.update(ordersTable).set({billingStatus:"AWAITING_PAYMENT",updatedAt:now}).where(and(eq(ordersTable.id,order.id),eq(ordersTable.businessId,businessId)));
-  // SMS confirmation is best-effort and secondary to the invoice email above,
-  // which has already succeeded by this point - a provider hiccup here must
-  // never fail the invoice-send request or roll back the status update.
+  // Attempt SMS independently: a Resend rejection must not prevent the
+  // customer receiving the invoice details by SMS.
   let smsStatus:"sent"|"failed"|"skipped"|"limit_reached"="skipped";
   try{
     const sms=await sendInvoiceSms({orderId:invoice.orderId,customerPhone:customer.phone??undefined,businessName:business.invoiceLegalName||business.name,invoiceNumber:invoice.invoiceNumber,total:Number(invoice.total),currency:invoice.currency,trackingId:order.trackingId,businessPlan:business.plan,businessId,skipDuplicateCheck:isResend});
     smsStatus=sms.smsStatus;
   }catch(err){req.log.error({err,invoiceId:id},"Invoice SMS send failed (non-fatal)");}
+  if(!sent.success){
+    req.log.error({invoiceId:id,businessId,customerId:customer.id,reason:sent.error||"unknown",smsStatus},"Invoice email delivery failed");
+    const smsMessage = smsStatus === "sent"
+      ? " SMS was accepted by the SMS provider."
+      : smsStatus === "failed"
+        ? " SMS could not be sent."
+        : smsStatus === "limit_reached"
+          ? " SMS skipped: the plan limit was reached."
+          : " SMS was skipped.";
+    res.status(502).json({error:`${sent.error||"Invoice email failed"}${smsMessage}`,smsStatus});return;
+  }
+  const now=new Date();const [updated]=await db.update(invoicesTable).set({status:"sent",sentAt:now,updatedAt:now}).where(and(eq(invoicesTable.id,id),eq(invoicesTable.businessId,businessId))).returning();
+  // Invoice sent -> billing_status AWAITING_PAYMENT (shipment status untouched).
+  await db.update(ordersTable).set({billingStatus:"AWAITING_PAYMENT",updatedAt:now}).where(and(eq(ordersTable.id,order.id),eq(ordersTable.businessId,businessId)));
   await db.insert(auditLogsTable).values({id:generateId(),businessId,userId,action:"SEND_INVOICE",entityType:"invoice",entityId:id,metadata:{orderId:invoice.orderId,messageId:sent.messageId,customerEmail:customer.email,smsStatus}});
   res.json({...serialize(updated),smsStatus});
 });
@@ -146,6 +154,13 @@ async function updateStatus(req:any,res:any,status:"sent"|"paid"){
   const invoice=await db.query.invoicesTable.findFirst({where:and(eq(invoicesTable.id,id),eq(invoicesTable.businessId,businessId))});
   if(!invoice){res.status(404).json({error:"Invoice not found"});return;}
   if(invoice.status==="cancelled"||(status==="paid"&&!canConfirmInvoicePaid(invoice.status))){res.status(409).json({error:`Cannot mark ${invoice.status} invoice as ${status}`});return;}
+  const [order,customer,business]=status==="paid"
+    ? await Promise.all([
+        db.query.ordersTable.findFirst({where:and(eq(ordersTable.id,invoice.orderId),eq(ordersTable.businessId,businessId))}),
+        db.query.customersTable.findFirst({where:and(eq(customersTable.id,invoice.customerId),eq(customersTable.businessId,businessId))}),
+        db.query.businessesTable.findFirst({where:eq(businessesTable.id,businessId)}),
+      ])
+    : [null,null,null];
   const now=new Date();
   const updated=await db.transaction(async(tx)=>{
     const [nextInvoice]=await tx.update(invoicesTable).set({status,sentAt:status==="sent"?now:invoice.sentAt,paidAt:status==="paid"?now:invoice.paidAt,paymentConfirmedBy:status==="paid"?userId:invoice.paymentConfirmedBy,updatedAt:now}).where(and(eq(invoicesTable.id,id),eq(invoicesTable.businessId,businessId))).returning();
@@ -157,7 +172,36 @@ async function updateStatus(req:any,res:any,status:"sent"|"paid"){
     await tx.update(ordersTable).set({billingStatus:status==="paid"?"PAID":"AWAITING_PAYMENT",updatedAt:now}).where(and(eq(ordersTable.id,invoice.orderId),eq(ordersTable.businessId,businessId)));
     return nextInvoice;
   });
-  await db.insert(auditLogsTable).values({id:generateId(),businessId,userId,action:status==="paid"?"CONFIRM_INVOICE_PAYMENT":"SEND_INVOICE",entityType:"invoice",entityId:id,metadata:{orderId:invoice.orderId,previousStatus:invoice.status,newStatus:status}});
-  res.json(serialize(updated));
+  let smsStatus:"sent"|"failed"|"skipped"|"limit_reached"="skipped";
+  if(status==="paid"&&order&&customer&&business){
+    const trackingBase=(process.env.PUBLIC_TRACKING_URL||"https://logistics.olyxee.com").replace(/\/$/,"");
+    try{
+      const sms=await sendOrderSms({
+        orderId:order.id,
+        customerPhone:customer.phone??undefined,
+        businessName:business.name,
+        trackingId:order.trackingId,
+        status:"PAYMENT_CONFIRMED",
+        statusMessage:null,
+        trackingLink:`${trackingBase}/track?code=${encodeURIComponent(order.trackingId)}`,
+        businessPlan:business.plan,
+        businessId,
+        bodyOverride:buildLifecycleSmsBody({
+          businessName:business.name,
+          trackingId:order.trackingId,
+          event:"Payment confirmed",
+          trackingLink:`${trackingBase}/track?code=${encodeURIComponent(order.trackingId)}`,
+        }),
+      });
+      smsStatus=sms.smsStatus;
+    }catch(err){
+      req.log.error({err,invoiceId:id,orderId:invoice.orderId},"Payment confirmation SMS failed (non-fatal)");
+      smsStatus="failed";
+    }
+  }else if(status==="paid"){
+    req.log.warn({invoiceId:id,orderId:invoice.orderId},"Payment confirmation SMS skipped: order, customer, or business is missing");
+  }
+  await db.insert(auditLogsTable).values({id:generateId(),businessId,userId,action:status==="paid"?"CONFIRM_INVOICE_PAYMENT":"SEND_INVOICE",entityType:"invoice",entityId:id,metadata:{orderId:invoice.orderId,previousStatus:invoice.status,newStatus:status,...(status==="paid"?{smsStatus}:{})}});
+  res.json({...serialize(updated),...(status==="paid"?{smsStatus}:{})});
 }
 export default router;

@@ -1,12 +1,7 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
-// The real featureFlags.smsNotifications constant is hardcoded to `false` in
-// @workspace/plans (see lib/plans/src/index.ts). That is correct for
-// production today, but it means sendSms() can never reach the provider in
-// its default state. To test the provider integration itself we mock the
-// flag on, the same way we'd want a future SMS_NOTIFICATIONS_ENABLED env var
-// to behave. See the "feature flag gate" describe block below for a test
-// against the *real*, un-mocked flag value.
+// Provider integration tests call the provider directly with mocked fetch.
+// Public sendSms() intentionally uses the no-op provider under NODE_ENV=test.
 const flagState = vi.hoisted(() => ({ smsNotifications: true }));
 
 vi.mock("@workspace/plans", () => ({
@@ -14,9 +9,12 @@ vi.mock("@workspace/plans", () => ({
     flag === "smsNotifications" ? flagState.smsNotifications : false,
 }));
 
-vi.mock("../lib/logger", () => ({
-  logger: { info: vi.fn(), warn: vi.fn(), error: vi.fn() },
+const loggerMock = vi.hoisted(() => ({
+  info: vi.fn(),
+  warn: vi.fn(),
+  error: vi.fn(),
 }));
+vi.mock("../lib/logger", () => ({ logger: loggerMock }));
 
 const ORIGINAL_ENV = { ...process.env };
 const fetchMock = vi.fn();
@@ -38,19 +36,29 @@ function mockAuthOk(token = "test-token", expiresInMinutes = 20) {
 // each test its own isolated cachedToken.
 let isSmsConfigured: typeof import("../lib/sms").isSmsConfigured;
 let sendSms: typeof import("../lib/sms").sendSms;
+let smsPortalProvider: typeof import("../lib/sms")._smsPortalProviderForTests;
+let normalisePhoneNumber: typeof import("../lib/sms").normalisePhoneNumber;
+
+function sendThroughSmsPortal(to: string, body: string) {
+  return smsPortalProvider.send({ to: normalisePhoneNumber(to), body });
+}
 
 beforeEach(async () => {
   vi.clearAllMocks();
   vi.resetModules();
   flagState.smsNotifications = true;
   process.env = { ...ORIGINAL_ENV };
+  process.env.NODE_ENV = "development";
   delete process.env.SMSPORTAL_CLIENT_ID;
   delete process.env.SMSPORTAL_API_SECRET;
   delete process.env.SMS_SENDER_ID;
+  delete process.env.SMS_PROVIDER;
   vi.stubGlobal("fetch", fetchMock);
   const mod = await import("../lib/sms");
   isSmsConfigured = mod.isSmsConfigured;
   sendSms = mod.sendSms;
+  smsPortalProvider = mod._smsPortalProviderForTests;
+  normalisePhoneNumber = mod.normalisePhoneNumber;
 });
 
 afterEach(() => {
@@ -81,16 +89,15 @@ describe("SMS provider configuration", () => {
     process.env.SMSPORTAL_CLIENT_ID = "client-1";
     expect(isSmsConfigured()).toBe(false);
   });
+
 });
 
 describe("SMS provider — feature flag gate (real, un-mocked value)", () => {
-  it("the real featureFlags.smsNotifications constant is currently false", async () => {
-    // Import the un-mocked module directly to confirm production behaviour:
-    // today, SMS is hard-disabled in source regardless of env credentials.
+  it("the released feature flag enables SMS notifications", async () => {
     const { isFeatureEnabled } = await vi.importActual<
       typeof import("@workspace/plans")
     >("@workspace/plans");
-    expect(isFeatureEnabled("smsNotifications")).toBe(false);
+    expect(isFeatureEnabled("smsNotifications")).toBe(true);
   });
 });
 
@@ -108,7 +115,7 @@ describe("sendSms — successful send", () => {
       json: async () => ({ messages: [{ messageId: "msg-123" }] }),
     } as Response);
 
-    const result = await sendSms({ to: "+27 71 234 5678", body: "Your order has shipped" });
+    const result = await sendThroughSmsPortal("+27 71 234 5678", "Your order has shipped");
 
     expect(result).toEqual({ success: true, providerMessageId: "msg-123" });
     expect(fetchMock).toHaveBeenCalledTimes(2);
@@ -123,8 +130,29 @@ describe("sendSms — successful send", () => {
     const body = JSON.parse(sendInit.body);
     expect(body.messages[0]).toEqual({
       content: "Your order has shipped",
-      destination: "+27712345678", // normalised: spaces stripped
+      destination: "+27712345678",
     });
+    expect(JSON.stringify(loggerMock.info.mock.calls)).not.toContain("+27712345678");
+  });
+
+  it.each([
+    ["local", "0821234567"],
+    ["international with plus", "+27821234567"],
+    ["international without plus", "27821234567"],
+    ["formatted local", "082 123 4567"],
+  ])("sends %s numbers as an E.164 destination", async (_label, to) => {
+    mockAuthOk();
+    fetchMock.mockResolvedValueOnce({
+      ok: true,
+      status: 200,
+      json: async () => ({ messages: [{ messageId: "msg-123" }] }),
+    } as Response);
+
+    const result = await sendThroughSmsPortal(to, "Test message");
+
+    expect(result.success).toBe(true);
+    const body = JSON.parse(fetchMock.mock.calls[1][1].body);
+    expect(body.messages[0].destination).toBe("+27821234567");
   });
 
   it("includes the configured sender ID when SMS_SENDER_ID is set", async () => {
@@ -136,7 +164,7 @@ describe("sendSms — successful send", () => {
       json: async () => ({ messages: [{ messageId: "msg-1" }] }),
     } as Response);
 
-    await sendSms({ to: "+27712345678", body: "Hi" });
+    await sendThroughSmsPortal("+27712345678", "Hi");
 
     const body = JSON.parse(fetchMock.mock.calls[1][1].body);
     expect(body.sendOptions).toEqual({ senderId: "Acme" });
@@ -149,14 +177,14 @@ describe("sendSms — successful send", () => {
       status: 200,
       json: async () => ({ messages: [{ messageId: "msg-1" }] }),
     } as Response);
-    await sendSms({ to: "+27712345678", body: "First" });
+    await sendThroughSmsPortal("+27712345678", "First");
 
     fetchMock.mockResolvedValueOnce({
       ok: true,
       status: 200,
       json: async () => ({ messages: [{ messageId: "msg-2" }] }),
     } as Response);
-    await sendSms({ to: "+27712345678", body: "Second" });
+    await sendThroughSmsPortal("+27712345678", "Second");
 
     // 2 calls for the first send (auth + send), only 1 more for the second
     // send (send only) because the token is cached.
@@ -166,7 +194,7 @@ describe("sendSms — successful send", () => {
 
 describe("sendSms — missing / invalid credentials", () => {
   it("returns a skipped failure and does not call fetch when credentials are absent", async () => {
-    const result = await sendSms({ to: "+27712345678", body: "Hi" });
+    const result = await sendThroughSmsPortal("+27712345678", "Hi");
 
     expect(result).toEqual({
       success: false,
@@ -179,7 +207,7 @@ describe("sendSms — missing / invalid credentials", () => {
   it("returns a skipped failure when only the client ID is set (partial credentials)", async () => {
     process.env.SMSPORTAL_CLIENT_ID = "client-1";
 
-    const result = await sendSms({ to: "+27712345678", body: "Hi" });
+    const result = await sendThroughSmsPortal("+27712345678", "Hi");
 
     expect(result.success).toBe(false);
     expect(fetchMock).not.toHaveBeenCalled();
@@ -194,7 +222,7 @@ describe("sendSms — missing / invalid credentials", () => {
       text: async () => "Invalid client credentials",
     } as Response);
 
-    const result = await sendSms({ to: "+27712345678", body: "Hi" });
+    const result = await sendThroughSmsPortal("+27712345678", "Hi");
 
     expect(result.success).toBe(false);
     if (!result.success) {
@@ -232,8 +260,10 @@ describe("sendSms — provider errors are handled without crashing", () => {
     } as Response);
 
     await expect(
-      sendSms({ to: "+27712345678", body: "Hi" }),
+      sendThroughSmsPortal("+27712345678", "Hi"),
     ).resolves.toEqual({ success: false, error: "SMSPortal send failed (503)" });
+    expect(JSON.stringify(loggerMock.error.mock.calls)).not.toContain("+27712345678");
+    expect(JSON.stringify(loggerMock.error.mock.calls)).not.toContain("Service temporarily unavailable");
   });
 
   it("re-authenticates once and retries on a 401 mid-send, then succeeds", async () => {
@@ -246,7 +276,7 @@ describe("sendSms — provider errors are handled without crashing", () => {
       json: async () => ({ messages: [{ messageId: "msg-retry" }] }),
     } as Response);
 
-    const result = await sendSms({ to: "+27712345678", body: "Hi" });
+    const result = await sendThroughSmsPortal("+27712345678", "Hi");
 
     expect(result).toEqual({ success: true, providerMessageId: "msg-retry" });
     expect(fetchMock).toHaveBeenCalledTimes(4); // auth, send(401), re-auth, send(ok)
@@ -256,7 +286,7 @@ describe("sendSms — provider errors are handled without crashing", () => {
     fetchMock.mockRejectedValueOnce(new Error("fetch failed: ETIMEDOUT"));
 
     await expect(
-      sendSms({ to: "+27712345678", body: "Hi" }),
+      sendThroughSmsPortal("+27712345678", "Hi"),
     ).resolves.toEqual({ success: false, error: "fetch failed: ETIMEDOUT" });
   });
 
@@ -270,7 +300,7 @@ describe("sendSms — provider errors are handled without crashing", () => {
       },
     } as unknown as Response);
 
-    const result = await sendSms({ to: "+27712345678", body: "Hi" });
+    const result = await sendThroughSmsPortal("+27712345678", "Hi");
     expect(result.success).toBe(true); // falls back to {} and an undefined messageId
   });
 });
@@ -283,32 +313,20 @@ describe("sendSms — invalid destination number", () => {
 
   it("rejects an empty/whitespace-only number before calling the provider", async () => {
     const result = await sendSms({ to: "   ", body: "Hi" });
-    expect(result).toEqual({ success: false, error: "Invalid destination number" });
+    expect(result).toEqual({ success: false, error: "Invalid destination phone number" });
     expect(fetchMock).not.toHaveBeenCalled();
   });
 
   it("rejects a number with no digits at all", async () => {
     const result = await sendSms({ to: "not-a-number", body: "Hi" });
-    expect(result).toEqual({ success: false, error: "Invalid destination number" });
+    expect(result).toEqual({ success: false, error: "Invalid destination phone number" });
     expect(fetchMock).not.toHaveBeenCalled();
   });
 
-  it("BUG: does not reject a digit string that is not a plausible phone number", async () => {
-    // normaliseNumber() only strips non-digit/non-plus characters; it never
-    // checks length or a country-code prefix. "123" survives normalisation
-    // and is sent to the provider as-is. This is a real gap — flagged in the
-    // test report as a recommended fix (add a minimum-length / E.164 check).
-    mockAuthOk();
-    fetchMock.mockResolvedValueOnce({
-      ok: true,
-      status: 200,
-      json: async () => ({ messages: [{ messageId: "msg-1" }] }),
-    } as Response);
-
+  it("rejects a digit string that is not a plausible phone number", async () => {
     const result = await sendSms({ to: "123", body: "Hi" });
 
-    expect(result.success).toBe(true);
-    const body = JSON.parse(fetchMock.mock.calls[1][1].body);
-    expect(body.messages[0].destination).toBe("123");
+    expect(result).toEqual({ success: false, error: "Invalid destination phone number" });
+    expect(fetchMock).not.toHaveBeenCalled();
   });
 });
