@@ -9,6 +9,13 @@ describe("plan catalog", () => {
     }
   });
 
+  it("enables SMS lifecycle notifications without plan quotas", () => {
+    expect(featureFlags.smsNotifications).toBe(true);
+    for (const id of ["beta", "free", "pro", "business"] as const) {
+      expect(getPlan(id).smsLimit).toBeNull();
+    }
+  });
+
   it("keeps unfinished launch features disabled", () => {
     expect(featureFlags.subscriptionBilling).toBe(false);
     expect(featureFlags.planEnforcement).toBe(false);

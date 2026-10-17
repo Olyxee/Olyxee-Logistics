@@ -55,9 +55,26 @@ vi.mock("../lib/email", () => ({
 vi.mock("../lib/email-usage", () => ({
   getMonthlyEmailUsage: vi.fn(async () => 0),
 }));
-const mockSendOrderSms = vi.fn(async (..._args: unknown[]) => ({ status: "skipped" }));
+const mockSendOrderSms = vi.fn(async (..._args: unknown[]): Promise<{
+  smsStatus: "sent" | "failed" | "skipped" | "limit_reached";
+  smsNotificationId: string | undefined;
+  smsUsage: number | undefined;
+  smsLimit: number | null | undefined;
+}> => ({
+  smsStatus: "skipped",
+  smsNotificationId: undefined,
+  smsUsage: undefined,
+  smsLimit: undefined,
+}));
 vi.mock("../lib/order-notifications", () => ({
   sendOrderSms: (...args: unknown[]) => mockSendOrderSms(...args),
+}));
+const mockSendInvoiceSms = vi.fn(async (..._args: unknown[]) => ({
+  smsStatus: "sent",
+  smsNotificationId: "sms-invoice-1",
+}));
+vi.mock("../lib/invoice-notifications", () => ({
+  sendInvoiceSms: (...args: unknown[]) => mockSendInvoiceSms(...args),
 }));
 vi.mock("../lib/notifications", () => ({
   recordNotification: vi.fn(async () => undefined),
@@ -182,8 +199,8 @@ describe("POST /orders — transport mode requirements", () => {
   });
 
   it("creates a SEA logistics order starting at ORDER_CONFIRMED", async () => {
-    mockDb.query.customersTable.findFirst.mockResolvedValue(CUSTOMER);
-    mockDb.query.businessesTable.findFirst.mockResolvedValue(LOGISTICS_BIZ);
+    mockDb.query.customersTable.findFirst.mockResolvedValue({ ...CUSTOMER, phone: "+27712345678" });
+    mockDb.query.businessesTable.findFirst.mockResolvedValue({ ...LOGISTICS_BIZ, plan: "beta" });
     const inserted = {
       id: "ord_1",
       businessId: "biz_test",
@@ -200,6 +217,12 @@ describe("POST /orders — transport mode requirements", () => {
     mockDb.insert
       .mockReturnValueOnce(insertChain([inserted]) as any) // order insert
       .mockReturnValue(insertChainPlain() as any); // tracking event + audit
+    mockSendOrderSms.mockResolvedValueOnce({
+      smsStatus: "sent",
+      smsNotificationId: "sms-created-1",
+      smsUsage: 1,
+      smsLimit: null,
+    });
     mockInvoiceTransaction();
     const app = await buildApp();
     const res = await request(app)
@@ -208,6 +231,19 @@ describe("POST /orders — transport mode requirements", () => {
     expect(res.status).toBe(201);
     expect(res.body.currentStatus).toBe("ORDER_CONFIRMED");
     expect(res.body.transportMode).toBe("SEA");
+    expect(res.body.invoiceEmailStatus).toBe("failed");
+    expect(res.body.orderSmsStatus).toBe("sent");
+    expect(res.body.invoiceSmsStatus).toBe("sent");
+    expect(mockSendOrderSms).toHaveBeenCalledWith(expect.objectContaining({
+      orderId: "ord_1",
+      customerPhone: "+27712345678",
+      bodyOverride: expect.stringContaining("Job created"),
+    }));
+    expect(mockSendInvoiceSms).toHaveBeenCalledWith(expect.objectContaining({
+      orderId: "ord_1",
+      customerPhone: "+27712345678",
+      businessPlan: "beta",
+    }));
   });
 
   it("records the optional internal Job cost during billing setup", async () => {
@@ -236,6 +272,35 @@ describe("POST /orders — transport mode requirements", () => {
     expect(res.status).toBe(201);
     expect(costValues).toHaveBeenCalledWith(expect.objectContaining({
       orderId: "ord_with_cost", amount: "325.50", currency: "ZAR",
+    }));
+  });
+
+  it("sends an order-created SMS for POSTPAID orders", async () => {
+    mockDb.query.customersTable.findFirst.mockResolvedValue({ ...CUSTOMER, phone: "+27712345678" });
+    mockDb.query.businessesTable.findFirst.mockResolvedValue({ ...LOGISTICS_BIZ, plan: "beta" });
+    const inserted = {
+      id: "ord_postpaid_created", businessId: "biz_test", customerId: "cust_1",
+      trackingId: "OLY-AAA-BBBB", jobNumber: "JOB-POST-1",
+      currentStatus: "ORDER_CONFIRMED", transportMode: "AIR",
+      createdAt: new Date(), updatedAt: new Date(),
+    };
+    mockDb.insert.mockReturnValueOnce(insertChain([inserted]) as any);
+    mockInvoiceTransaction();
+    const app = await buildApp();
+
+    const res = await request(app).post("/orders").send({
+      customerId: "cust_1", jobNumber: "JOB-POST-1", billingType: "POSTPAID",
+      transportMode: "AIR", cargoType: "Electronics", serviceRequired: "Freight",
+      weight: "4 kg",
+    });
+
+    expect(res.status).toBe(201);
+    expect(res.body.orderSmsStatus).toBe("skipped");
+    expect(res.body.invoiceId).toBeNull();
+    expect(mockSendOrderSms).toHaveBeenCalledWith(expect.objectContaining({
+      orderId: "ord_postpaid_created",
+      customerPhone: "+27712345678",
+      bodyOverride: expect.stringContaining("Job created"),
     }));
   });
 

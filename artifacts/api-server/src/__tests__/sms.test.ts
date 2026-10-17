@@ -25,6 +25,18 @@ describe("phone number validation", () => {
     expect(isValidPhoneNumber("0821234567")).toBe(true);
   });
 
+  it.each([
+    ["local SA mobile", "0821234567", "+27821234567"],
+    ["international SA with plus", "+27821234567", "+27821234567"],
+    ["international SA without plus", "27821234567", "+27821234567"],
+    ["formatted local SA mobile", "082 123 4567", "+27821234567"],
+    ["formatted international SA mobile", "+27 (82) 123-4567", "+27821234567"],
+    ["international 00 prefix", "0027821234567", "+27821234567"],
+  ])("normalises %s to E.164", (_label, input, expected) => {
+    expect(normalisePhoneNumber(input)).toBe(expected);
+    expect(isValidPhoneNumber(input)).toBe(true);
+  });
+
   it("accepts numbers with formatting punctuation", () => {
     expect(isValidPhoneNumber("+27 82 123 4567")).toBe(true);
   });
@@ -50,6 +62,14 @@ describe("phone number validation", () => {
   it("rejects non-numeric junk", () => {
     expect(isValidPhoneNumber("not-a-phone-number")).toBe(false);
   });
+
+  it.each(["123", "082123456", "08212345678", "+27021234567", "2782123456"])(
+    "rejects malformed or incomplete number %s",
+    (input) => {
+      expect(isValidPhoneNumber(input)).toBe(false);
+      expect(normalisePhoneNumber(input)).toBe("");
+    },
+  );
 
   it("strips formatting characters when normalising", () => {
     expect(normalisePhoneNumber("+27 (82) 123-4567")).toBe("+27821234567");

@@ -3,9 +3,8 @@
 // so the plan catalog, feature flags, and launch dates are defined once and
 // never drift between pricing UI, badges, and (future) enforcement.
 //
-// IMPORTANT: nothing in this file turns a feature on by itself. Feature flags
-// gate every unfinished capability; leave them false until the capability is
-// fully built and verified.
+// IMPORTANT: feature flags gate capabilities that have not been released.
+// Keep unfinished features false until they are fully built and verified.
 
 // ─── Plan catalog ────────────────────────────────────────────────────────────
 // `null` limits mean "unlimited". `beta` is the current plan for every existing
@@ -50,6 +49,7 @@ export const plans: Record<PlanId, PlanConfig> = {
     active: true,
     enforceLimits: false,
     emailLimit: 100,
+    smsLimit: null,
   },
 
   free: {
@@ -60,7 +60,7 @@ export const plans: Record<PlanId, PlanConfig> = {
     price: 89,
     orderLimit: null,
     emailLimit: 100,
-    smsLimit: 0,
+    smsLimit: null,
     advancedCustomization: false,
     removeOlyxeeBranding: false,
     tagline: "Run your freight jobs in one place.",
@@ -77,6 +77,7 @@ export const plans: Record<PlanId, PlanConfig> = {
       "Freight-rate and quote support",
       "Shipment status updates",
       "Email shipment notifications",
+      "SMS lifecycle notifications",
       "Basic reporting",
       "Up to 100 status updates per month",
     ],
@@ -90,7 +91,7 @@ export const plans: Record<PlanId, PlanConfig> = {
     active: false,
     orderLimit: 300,
     emailLimit: null,
-    smsLimit: 0,
+    smsLimit: null,
     advancedCustomization: true,
     removeOlyxeeBranding: true,
     features: [],
@@ -105,7 +106,7 @@ export const plans: Record<PlanId, PlanConfig> = {
     price: 999,
     orderLimit: null,
     emailLimit: 500,
-    smsLimit: 0,
+    smsLimit: null,
     callMinutesLimit: 0,
     advancedCustomization: true,
     removeOlyxeeBranding: true,
@@ -130,7 +131,6 @@ export const plans: Record<PlanId, PlanConfig> = {
       "Customs and clearance workflow automation",
       "Automatic customer, supplier and agent follow-ups",
       "Customer self-service portal",
-      "SMS shipment notifications",
       "AI call agent",
       "Orgni Intelligence",
       "Carrier integrations",
@@ -160,13 +160,12 @@ export type SubscriptionStatus =
 
 // ─── Feature flags ───────────────────────────────────────────────────────────
 // Every unfinished route, component, service, background job, or migration MUST
-// check the relevant flag and no-op / hide when it is false. Keep these false in
-// production for this preparation release.
+// check the relevant flag and no-op / hide when it is false.
 
 export const featureFlags = {
-  // SMS is fully removed from the product for now (pricing, notifications,
-  // settings). The dormant code paths stay behind this flag.
-  smsNotifications: false,
+  // SMS lifecycle notifications are released for every plan; provider
+  // credentials are configured per deployment environment.
+  smsNotifications: true,
   subscriptionBilling: false,
   planEnforcement: false,
   businessBranding: false,

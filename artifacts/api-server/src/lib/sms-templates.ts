@@ -58,6 +58,30 @@ export interface SendInvoiceSmsParams {
   trackingId?: string | null;
 }
 
+export interface BuildLifecycleSmsParams {
+  businessName: string;
+  trackingId: string;
+  event: "Job created" | "Payment confirmed";
+  trackingLink?: string;
+}
+
+export function buildLifecycleSmsBody(params: BuildLifecycleSmsParams): string {
+  const parts = [
+    `${params.businessName}: ${params.event}`,
+    `Ref: ${params.trackingId}`,
+  ];
+  const trackingLink = params.trackingLink?.trim();
+  if (trackingLink) parts.push(trackingLink);
+
+  const body = parts.join(" | ");
+  if (body.length <= 160) return body;
+  if (trackingLink) {
+    const suffix = ` | ${trackingLink}`;
+    return `${body.slice(0, Math.max(0, 157 - suffix.length)).trimEnd()}...${suffix}`;
+  }
+  return `${body.slice(0, 157)}...`;
+}
+
 // Build a concise "invoice sent" SMS. Confirms an invoice went out and gives
 // the amount due - full line-item detail stays in the emailed PDF, not SMS.
 export function buildInvoiceSmsBody(params: SendInvoiceSmsParams): string {
@@ -69,7 +93,7 @@ export function buildInvoiceSmsBody(params: SendInvoiceSmsParams): string {
   if (params.trackingId) {
     parts.push(`Ref: ${params.trackingId}`);
   }
-  parts.push("Check your email for the full invoice.");
+  parts.push("Contact us for the full invoice.");
 
   const body = parts.join(" | ");
   return body.length > 160 ? `${body.slice(0, 157)}...` : body;

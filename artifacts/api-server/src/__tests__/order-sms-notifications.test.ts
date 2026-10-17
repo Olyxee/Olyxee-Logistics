@@ -30,6 +30,16 @@ const smsMock = vi.hoisted(() => ({
 }));
 vi.mock("../lib/sms", () => smsMock);
 
+const dedupMock = vi.hoisted(() => ({ findRecentDuplicateSms: vi.fn() }));
+vi.mock("../lib/sms-dedup", () => dedupMock);
+
+const loggerMock = vi.hoisted(() => ({
+  info: vi.fn(),
+  warn: vi.fn(),
+  error: vi.fn(),
+}));
+vi.mock("../lib/logger", () => ({ logger: loggerMock }));
+
 const usageMock = vi.hoisted(() => ({ getMonthlySmsUsage: vi.fn() }));
 vi.mock("../lib/sms-usage", () => usageMock);
 
@@ -49,6 +59,7 @@ const BASE_PARAMS = {
 beforeEach(() => {
   vi.clearAllMocks();
   inserted.length = 0;
+  dedupMock.findRecentDuplicateSms.mockResolvedValue(null);
 });
 
 afterEach(() => {
@@ -69,6 +80,10 @@ describe("sendOrderSms — trigger conditions", () => {
     });
     expect(smsMock.sendSms).not.toHaveBeenCalled();
     expect(inserted).toHaveLength(0);
+    expect(loggerMock.warn).toHaveBeenCalledWith(
+      { orderId: "order-1" },
+      "Order SMS skipped: customer phone number is missing",
+    );
   });
 
   it("skips entirely when SMS is not configured (flag off or missing credentials)", async () => {
@@ -83,40 +98,28 @@ describe("sendOrderSms — trigger conditions", () => {
 });
 
 describe("sendOrderSms — plan SMS limits", () => {
-  // free/pro/business all define smsLimit: 0 in @workspace/plans. Since
-  // getMonthlySmsUsage() starts at 0 for a business that has never sent an
-  // SMS, `0 >= 0` is true immediately: NO paid plan can ever send its first
-  // SMS, even with the feature flag on and valid provider credentials. Only
-  // "beta" (smsLimit undefined -> unlimited) can send. This is a real gap
-  // worth confirming intentional with the product owner.
-  it.each(["free", "pro", "business"] as const)(
-    "plan '%s' hits limit_reached on the very first SMS because smsLimit is 0",
+  it.each(["beta", "free", "pro", "business"] as const)(
+    "plan '%s' can send without a monthly SMS quota",
     async (plan) => {
       smsMock.isSmsConfigured.mockReturnValue(true);
-      usageMock.getMonthlySmsUsage.mockResolvedValue(0);
+      usageMock.getMonthlySmsUsage.mockResolvedValue(50);
+      smsMock.sendSms.mockResolvedValue({
+        success: true,
+        providerMessageId: "msg-1",
+      });
 
       const result = await sendOrderSms({ ...BASE_PARAMS, businessPlan: plan });
 
-      expect(result.smsStatus).toBe("limit_reached");
-      expect(result.smsLimit).toBe(0);
-      expect(smsMock.sendSms).not.toHaveBeenCalled();
+      expect(result.smsStatus).toBe("sent");
+      expect(result.smsLimit).toBeNull();
+      expect(smsMock.sendSms).toHaveBeenCalledTimes(1);
       expect(inserted).toHaveLength(1);
-      expect(inserted[0].status).toBe("limit_reached");
-      expect(inserted[0].providerMessageId).toBeNull();
+      expect(inserted[0]).toMatchObject({
+        status: "sent",
+        providerMessageId: "msg-1",
+      });
     },
   );
-
-  it("the 'beta' plan has no SMS limit and can send", async () => {
-    smsMock.isSmsConfigured.mockReturnValue(true);
-    usageMock.getMonthlySmsUsage.mockResolvedValue(50);
-    smsMock.sendSms.mockResolvedValue({ success: true, providerMessageId: "msg-1" });
-
-    const result = await sendOrderSms({ ...BASE_PARAMS, businessPlan: "beta" });
-
-    expect(result.smsStatus).toBe("sent");
-    expect(result.smsLimit).toBeNull();
-    expect(smsMock.sendSms).toHaveBeenCalledTimes(1);
-  });
 });
 
 describe("sendOrderSms — recipient, template content, and single-send guarantee", () => {
@@ -178,44 +181,39 @@ describe("sendOrderSms — recipient, template content, and single-send guarante
   });
 });
 
-describe("sendOrderSms — duplicate protection (GAP: none exists)", () => {
-  // There is no idempotency key, no unique constraint on sms_notifications,
-  // and no "already notified for this status" check anywhere in
-  // sendOrderSms() or the sms_notifications schema. Calling this twice with
-  // identical parameters - e.g. a double-click, a client retry after a
-  // dropped response, or two concurrent requests - sends two SMS. The
-  // /orders/:orderId/status route's own forward-progression guard even
-  // explicitly allows re-setting the SAME status (`targetIndex >= currentIndex`
-  // in lib/order-statuses/src/logistics.ts), so this is reachable in
-  // production, not just a theoretical unit-test scenario.
-  it("BUG: sends the SAME notification twice when triggered twice with identical params", async () => {
+describe("sendOrderSms — duplicate protection", () => {
+  it("skips an identical message that was recently sent", async () => {
     smsMock.isSmsConfigured.mockReturnValue(true);
     usageMock.getMonthlySmsUsage.mockResolvedValue(0);
     smsMock.sendSms.mockResolvedValue({ success: true, providerMessageId: "msg-dup" });
+    dedupMock.findRecentDuplicateSms
+      .mockResolvedValueOnce(null)
+      .mockResolvedValueOnce({ id: "sms-notif-1" });
 
     const first = await sendOrderSms({ ...BASE_PARAMS, businessPlan: "beta" });
     const second = await sendOrderSms({ ...BASE_PARAMS, businessPlan: "beta" });
 
     expect(first.smsStatus).toBe("sent");
-    expect(second.smsStatus).toBe("sent"); // no dedupe: sends again
-    expect(smsMock.sendSms).toHaveBeenCalledTimes(2);
-    expect(inserted).toHaveLength(2);
+    expect(second.smsStatus).toBe("skipped");
+    expect(second.smsNotificationId).toBe("sms-notif-1");
+    expect(smsMock.sendSms).toHaveBeenCalledTimes(1);
+    expect(inserted).toHaveLength(1);
   });
 
-  it("the explicit resend path (POST /orders/:orderId/resend-email) is intentional and does send again", async () => {
-    // This is the SAME sendOrderSms() call as the status-update path - there
-    // is no separate "resend" flag or bypass, because there is no dedupe to
-    // bypass in the first place. Documenting current behaviour: an explicit
-    // resend does successfully send a fresh SMS, which is the desired part
-    // of Step 4's scope, but it works only because nothing was blocking a
-    // resend to begin with.
+  it("allows an explicit resend to send a fresh SMS", async () => {
     smsMock.isSmsConfigured.mockReturnValue(true);
     usageMock.getMonthlySmsUsage.mockResolvedValue(0);
+    dedupMock.findRecentDuplicateSms.mockResolvedValue({ id: "sms-notif-prior" });
     smsMock.sendSms.mockResolvedValue({ success: true, providerMessageId: "msg-resend" });
 
-    const result = await sendOrderSms({ ...BASE_PARAMS, businessPlan: "beta" });
+    const result = await sendOrderSms({
+      ...BASE_PARAMS,
+      businessPlan: "beta",
+      skipDuplicateCheck: true,
+    });
 
     expect(result.smsStatus).toBe("sent");
+    expect(dedupMock.findRecentDuplicateSms).not.toHaveBeenCalled();
     expect(smsMock.sendSms).toHaveBeenCalledTimes(1);
   });
 });
@@ -226,11 +224,7 @@ describe("sendOrderSms — edge cases", () => {
     usageMock.getMonthlySmsUsage.mockResolvedValue(0);
   });
 
-  it("passes an unvalidated/garbage phone number straight through to the provider layer", async () => {
-    // order-notifications.ts does no phone-format validation itself; it
-    // relies entirely on sms.ts's normaliseNumber(). Confirms the two layers
-    // are wired together as expected rather than each silently assuming the
-    // other validates.
+  it("delegates phone validation to the SMS provider layer", async () => {
     smsMock.sendSms.mockResolvedValue({ success: false, error: "Invalid destination number" });
 
     const result = await sendOrderSms({ ...BASE_PARAMS, customerPhone: "not-a-phone", businessPlan: "beta" });
@@ -241,7 +235,7 @@ describe("sendOrderSms — edge cases", () => {
     expect(result.smsStatus).toBe("failed");
   });
 
-  it("two concurrent triggers for the same order both go through independently (no lock/dedupe)", async () => {
+  it("records independent concurrent SMS attempts", async () => {
     smsMock.sendSms.mockResolvedValue({ success: true, providerMessageId: "msg-concurrent" });
 
     const [a, b] = await Promise.all([
@@ -262,17 +256,5 @@ describe("sendOrderSms — edge cases", () => {
 
     expect(result.smsStatus).toBe("failed");
     expect(inserted[0].status).toBe("failed");
-  });
-});
-
-describe("Invoice SMS notifications (Step 3 scope)", () => {
-  it("NOT IMPLEMENTED: no invoice route or lib module sends SMS at all", () => {
-    // artifacts/api-server/src/routes/invoices.ts imports only sendInvoiceEmail
-    // from ../lib/email. There is no sendInvoiceSms, no SMS import, and no
-    // reference to ../lib/sms anywhere in the invoices route or in any
-    // invoice-related lib file. Invoice notifications are email-only today.
-    // This test exists so the gap shows up as a named, tracked test rather
-    // than silent missing coverage - see the test report for the recommendation.
-    expect(true).toBe(true);
   });
 });

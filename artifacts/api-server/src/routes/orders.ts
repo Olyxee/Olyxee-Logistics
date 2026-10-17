@@ -21,6 +21,8 @@ import { sendStatusEmail, buildEmailBody, sendInvoiceEmail } from "../lib/email"
 import { getMonthlyEmailUsage } from "../lib/email-usage";
 import { effectiveEmailLimit } from "../lib/plan-enforcement";
 import { sendOrderSms } from "../lib/order-notifications";
+import { sendInvoiceSms } from "../lib/invoice-notifications";
+import { buildLifecycleSmsBody } from "../lib/sms-templates";
 import { recordNotification, type DeliveryStatus } from "../lib/notifications";
 import { getPlan } from "@workspace/plans";
 import { z } from "zod";
@@ -455,6 +457,32 @@ router.post("/orders", requireAuth, async (req, res) => {
     }
     const o = inserted;
     const trackingId = o.trackingId;
+    const sendCreatedSms = async (): Promise<"sent" | "failed" | "skipped" | "limit_reached"> => {
+      if (!business) return "skipped";
+      try {
+        const sms = await sendOrderSms({
+          orderId: o.id,
+          customerPhone: customer.phone ?? undefined,
+          businessName: business.name,
+          trackingId,
+          status: "ORDER_CONFIRMED",
+          statusMessage: initialMessage,
+          trackingLink: buildTrackingLink(business.websiteUrl ?? "", trackingId),
+          businessPlan: business.plan,
+          businessId,
+          bodyOverride: buildLifecycleSmsBody({
+            businessName: business.name,
+            trackingId,
+            event: "Job created",
+            trackingLink: buildTrackingLink(business.websiteUrl ?? "", trackingId),
+          }),
+        });
+        return sms.smsStatus;
+      } catch (err) {
+        req.log.error({ err, orderId: o.id }, "Order-created SMS failed (non-fatal)");
+        return "failed";
+      }
+    };
 
     // POSTPAID: no invoice and no invoice email at creation. Record the "Job
     // created" tracking event so the shipment timeline starts, then return. The
@@ -466,7 +494,8 @@ router.post("/orders", requireAuth, async (req, res) => {
         await tx.insert(trackingEventsTable).values({id:generateId(),orderId:o.id,status:initialStatus,message:initialMessage,createdBy:userId});
         await tx.insert(auditLogsTable).values({id:generateId(),businessId,userId,action:"CREATE_JOB",entityType:"order",entityId:o.id,metadata:{trackingId:o.trackingId,jobNumber,billingType}});
       });
-      res.status(201).json({...serializeOrder(o),invoiceId:null,invoiceEmailStatus:"skipped"});
+      const orderSmsStatus = await sendCreatedSms();
+      res.status(201).json({...serializeOrder(o),invoiceId:null,invoiceEmailStatus:"skipped",orderSmsStatus});
       return;
     }
 
@@ -486,16 +515,37 @@ router.post("/orders", requireAuth, async (req, res) => {
       await tx.insert(auditLogsTable).values({id:generateId(),businessId,userId,action:"CREATE_ORDER_AND_INVOICE",entityType:"order",entityId:o.id,metadata:{trackingId:o.trackingId,invoiceId,invoiceNumber:invoiceNo}});
     });
 
+    const orderSmsStatus = await sendCreatedSms();
     const delivery = business ? await sendInvoiceEmail({businessId,senderBusinessName:business.name,customerEmail:customer.email,customerName:customer.fullName,customerAddress:customer.address,customerPhone:customer.phone,invoiceNumber:invoiceNo,createdAt:new Date(),dueDate,description:o.cargoType||o.description||"Cross-border logistics service",serviceDetails:o.serviceRequired||"",quantity:1,subtotal,additionalCharges,total,currency:"ZAR",businessName:business.invoiceLegalName||business.name,supportEmail:business.invoiceEmail||business.supportEmail,businessPhone:business.invoicePhone||business.phone,businessAddress:business.invoiceAddress||business.location,logoUrl:business.businessLogoUrl||business.invoiceLogoUrl,companyRegistration:business.invoiceRegistrationNumber||undefined,taxNumber:business.invoiceTaxNumber,paymentDetails:business.invoicePaymentDetails,paymentTerms:business.invoicePaymentTerms,footerNote:business.invoiceFooterNote,primaryColor:business.primaryBrandColour,orderReference:o.orderReference,jobNumber:o.jobNumber,trackingId:o.trackingId,externalTrackingNumber:o.supplierTrackingNumber,origin:o.origin,destination:o.destination,transportMode:o.transportMode,weight:o.weight}) : {success:false,error:"Business not found"};
+    let invoiceSmsStatus: "sent" | "failed" | "skipped" | "limit_reached" = "skipped";
+    if (business) {
+      try {
+        const sms = await sendInvoiceSms({
+          orderId: o.id,
+          customerPhone: customer.phone ?? undefined,
+          businessName: business.invoiceLegalName || business.name,
+          invoiceNumber: invoiceNo,
+          total,
+          currency: "ZAR",
+          trackingId: o.trackingId,
+          businessPlan: business.plan,
+          businessId,
+        });
+        invoiceSmsStatus = sms.smsStatus;
+      } catch (err) {
+        req.log.error({ err, invoiceId, orderId: o.id }, "Automatic invoice SMS failed (non-fatal)");
+        invoiceSmsStatus = "failed";
+      }
+    }
     if(delivery.success){
       await db.update(invoicesTable).set({status:"sent",sentAt:new Date(),updatedAt:new Date()}).where(and(eq(invoicesTable.id,invoiceId),eq(invoicesTable.businessId,businessId)));
       // Invoice sent -> billing_status AWAITING_PAYMENT.
       await db.update(ordersTable).set({billingStatus:"AWAITING_PAYMENT",updatedAt:new Date()}).where(and(eq(ordersTable.id,o.id),eq(ordersTable.businessId,businessId)));
-      await db.insert(auditLogsTable).values({id:generateId(),businessId,userId,action:"AUTO_SEND_INVOICE",entityType:"invoice",entityId:invoiceId,metadata:{messageId:delivery.messageId,customerEmail:customer.email}});
+      await db.insert(auditLogsTable).values({id:generateId(),businessId,userId,action:"AUTO_SEND_INVOICE",entityType:"invoice",entityId:invoiceId,metadata:{messageId:delivery.messageId,customerEmail:customer.email,smsStatus:invoiceSmsStatus}});
     } else {
-      req.log?.error({invoiceId,error:delivery.error},"Automatic invoice email failed");
+      req.log?.error({invoiceId,error:delivery.error,smsStatus:invoiceSmsStatus},"Automatic invoice email failed");
     }
-    res.status(201).json({...serializeOrder({...o,invoiceId}),invoiceId,invoiceEmailStatus:delivery.success?"sent":"failed"});
+    res.status(201).json({...serializeOrder({...o,invoiceId}),invoiceId,invoiceEmailStatus:delivery.success?"sent":"failed",orderSmsStatus,invoiceSmsStatus});
   } catch (err) {
     req.log.error({ err }, "Failed to create order");
     res.status(500).json({ error: "Internal server error" });
@@ -537,7 +587,33 @@ router.post("/orders/:orderId/supplier-tracking", requireAuth, async (req, res) 
       await tx.insert(auditLogsTable).values({ id: generateId(), businessId, userId, action: "SET_SUPPLIER_TRACKING_NUMBER", entityType: "order", entityId: orderId, metadata: { previousValue: order.supplierTrackingNumber, newValue: supplierTrackingNumber, addedAt: now.toISOString(), advanced: advancing } });
       return nextOrder;
     });
-    res.json(serializeOrder(updated));
+    let smsStatus: "sent" | "failed" | "skipped" | "limit_reached" = "skipped";
+    if (advancing) {
+      const [customer, business] = await Promise.all([
+        db.query.customersTable.findFirst({ where: and(eq(customersTable.id, order.customerId), eq(customersTable.businessId, businessId)) }),
+        db.query.businessesTable.findFirst({ where: eq(businessesTable.id, businessId) }),
+      ]);
+      if (business) {
+        try {
+          const sms = await sendOrderSms({
+            orderId,
+            customerPhone: customer?.phone ?? undefined,
+            businessName: business.name,
+            trackingId: order.trackingId,
+            status: logisticsStatusLabel("RECEIVED_FROM_SUPPLIER"),
+            statusMessage: "Cargo received at the China warehouse; shipment tracking is now active",
+            trackingLink: buildTrackingLink(business.websiteUrl ?? "", order.trackingId),
+            businessPlan: business.plan,
+            businessId,
+          });
+          smsStatus = sms.smsStatus;
+        } catch (err) {
+          req.log.error({ err, orderId }, "Supplier receipt SMS failed (non-fatal)");
+          smsStatus = "failed";
+        }
+      }
+    }
+    res.json({ ...serializeOrder(updated), ...(advancing ? { smsStatus } : {}) });
   } catch (err) { req.log.error({ err }, "Failed to set supplier tracking number"); res.status(500).json({ error: "Internal server error" }); }
 });
 

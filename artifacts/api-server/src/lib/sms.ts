@@ -35,21 +35,54 @@ export interface SmsProvider {
 }
 
 // ─── Phone number validation ─────────────────────────────────────────────────
-// Deliberately lightweight (no phone-number library): reject anything that
-// obviously isn't a phone number (empty, letters, way too short/long) while
-// still accepting both E.164 ("+27821234567") and plain local-format numbers
-// ("0821234567") that real customer records contain. A "+" is only valid as
-// the very first character.
+// Customer records may contain South African national numbers or international
+// numbers. SMSPortal requires E.164 for international sends, so convert known
+// South African local forms and leave valid international E.164 numbers intact.
 export function normalisePhoneNumber(raw: string): string {
-  return raw.replace(/[^\d+]/g, "");
+  const trimmed = raw.trim();
+  if (!trimmed || trimmed.length > 32 || !/^[+\d\s().-]+$/.test(trimmed)) {
+    return "";
+  }
+
+  const compact = trimmed.replace(/[\s().-]/g, "");
+  if (
+    (compact.match(/\+/g) ?? []).length > 1 ||
+    (compact.includes("+") && !compact.startsWith("+"))
+  ) {
+    return "";
+  }
+
+  if (compact.startsWith("+27")) {
+    return /^\+27[6-8]\d{8}$/.test(compact) ? compact : "";
+  }
+  if (compact.startsWith("+")) {
+    return /^\+[1-9]\d{7,14}$/.test(compact) ? compact : "";
+  }
+  if (/^00[1-9]\d{7,14}$/.test(compact)) return `+${compact.slice(2)}`;
+  if (/^0[6-8]\d{8}$/.test(compact)) return `+27${compact.slice(1)}`;
+  if (/^27[6-8]\d{8}$/.test(compact)) return `+${compact}`;
+  return "";
 }
 
 export function isValidPhoneNumber(raw: string | null | undefined): boolean {
   if (!raw) return false;
   const normalised = normalisePhoneNumber(raw);
-  if (normalised.includes("+") && !normalised.startsWith("+")) return false;
-  const digitCount = normalised.replace(/\+/g, "").length;
-  return digitCount >= 9 && digitCount <= 15;
+  if (!normalised) return false;
+
+  // Validate the South African mobile national range rather than treating any
+  // digit string beginning with 0/27 as a plausible recipient.
+  if (normalised.startsWith("+27")) {
+    return /^\+27[6-8]\d{8}$/.test(normalised);
+  }
+
+  // E.164 is a leading "+" followed by 8-15 digits and a non-zero country
+  // code. SMSPortal documents E.164 for international messages.
+  return /^\+[1-9]\d{7,14}$/.test(normalised);
+}
+
+function maskPhoneNumber(raw: string): string {
+  const digits = raw.replace(/\D/g, "");
+  return `***${digits.slice(-4)}`;
 }
 
 // ─── SMSPortal provider ──────────────────────────────────────────────────────
@@ -79,10 +112,7 @@ async function getAuthToken(): Promise<string> {
     headers: { Authorization: `Basic ${basic}` },
   });
   if (!res.ok) {
-    const text = await res.text().catch(() => "");
-    throw new Error(
-      `SMSPortal authentication failed (${res.status}): ${text.slice(0, 300)}`,
-    );
+    throw new Error(`SMSPortal authentication failed (${res.status})`);
   }
   const data = (await res.json()) as {
     token?: string;
@@ -142,10 +172,9 @@ const smsPortalProvider: SmsProvider = {
         res = await doSend();
       }
       if (!res.ok) {
-        const text = await res.text().catch(() => "");
         if (res.status === 401) cachedToken = null;
         logger.error(
-          { status: res.status, body: text.slice(0, 500), to },
+          { status: res.status, recipient: maskPhoneNumber(to) },
           "SMSPortal send failed",
         );
         return { success: false, error: `SMSPortal send failed (${res.status})` };
@@ -154,10 +183,16 @@ const smsPortalProvider: SmsProvider = {
         messages?: Array<{ messageId?: string }>;
       };
       const providerMessageId = data.messages?.[0]?.messageId;
-      logger.info({ to, providerMessageId }, "SMS sent via SMSPortal");
+      logger.info(
+        { recipient: maskPhoneNumber(to), providerMessageId },
+        "SMS accepted by SMSPortal",
+      );
       return { success: true, providerMessageId };
     } catch (err) {
-      logger.error({ err, to }, "SMSPortal send errored");
+      logger.error(
+        { err, recipient: maskPhoneNumber(to) },
+        "SMSPortal send errored",
+      );
       return {
         success: false,
         error: err instanceof Error ? err.message : "SMS send failed",
@@ -175,7 +210,7 @@ const noopProvider: SmsProvider = {
   name: "noop",
   async send({ to, body }) {
     logger.info(
-      { to, bodyLength: body.length },
+      { recipient: maskPhoneNumber(to), bodyLength: body.length },
       "[sms:noop] Simulated SMS send - no message was actually sent",
     );
     return { success: true, providerMessageId: `noop-${Date.now()}` };
@@ -227,6 +262,10 @@ export async function sendSms(params: SendSmsParams): Promise<SmsResult> {
     return { success: false, error: "SMS channel disabled", skipped: true };
   }
   if (!isValidPhoneNumber(params.to)) {
+    logger.warn(
+      { recipient: maskPhoneNumber(params.to) },
+      "SMS send skipped: invalid destination phone number",
+    );
     return { success: false, error: "Invalid destination phone number" };
   }
 
